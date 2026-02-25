@@ -1,0 +1,25 @@
+# Terraform files
+**/.terraform/*
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+.terraformrc
+terraform.rc
+*.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Crash log files
+crash.log
+
+# Lambda build artifacts
+builds/
+__pycache__/
+*.zip
+.tox
+
+# Editors files
+.DS_Store
+.idea
