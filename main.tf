@@ -1,3 +1,12 @@
+data "aws_caller_identity" "current" {}
+
+data "aws_partition" "current" {}
+
+locals {
+  s3_bucket_arn = var.s3_create_bucket ? module.s3_bucket.s3_bucket_arn : "arn:${data.aws_partition.current.partition}:s3:::${var.s3_bucket_name}"
+}
+
+
 #-----------------------------#
 #             S 3             #
 #-----------------------------#
@@ -42,44 +51,45 @@ module "s3_bucket" {
 #       BUCKET POLICY       #
 #---------------------------#
 data "aws_iam_policy_document" "s3_bucket" {
-  # # Allow CloudFront to read objects via Origin Access Controls (OAC)
-  # statement {
-  #   sid       = "AllowCloudFrontServicePrincipalReadOnly"
-  #   actions   = ["s3:GetObject"]
-  #   effect    = "Allow"
-  #   resources = ["${module.s3_bucket.s3_bucket_arn}/*"]
+  # Allow CloudFront to read objects via Origin Access Controls (OAC)
+  statement {
+    sid       = "AllowCloudFrontServicePrincipalReadOnly"
+    actions   = ["s3:GetObject"]
+    effect    = "Allow"
+    resources = ["${local.s3_bucket_arn}/*"]
 
-  #   principals {
-  #     type        = "Service"
-  #     identifiers = ["cloudfront.amazonaws.com"]
-  #   }
+    principals {
+      type        = "Service"
+      identifiers = ["cloudfront.amazonaws.com"]
+    }
 
-  #   condition {
-  #     test     = "StringEquals"
-  #     variable = "AWS:SourceArn"
-  #     values   = [module.cloudfront.cloudfront_distribution_arn]
-  #   }
-  # }
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceArn"
+      values   = [module.cloudfront.cloudfront_distribution_arn]
+    }
+  }
 
-  # Allow updating objects for admin IAM user
-  # statement {
-  #   sid     = "AllowAdminUserFullAccess"
-  #   effect  = "Allow"
-  #   actions = ["s3:PutObject"]
-  #   resources = [
-  #     "${module.s3_bucket.s3_bucket_arn}/*",
-  #     module.s3_bucket.s3_bucket_arn
-  #   ]
+  # Allow all S3 actions for current IAM user
+  statement {
+    sid     = "AllowAdminUserFullAccess"
+    effect  = "Allow"
+    actions = ["s3:*"]
+    resources = [
+      "${local.s3_bucket_arn}/*",
+      local.s3_bucket_arn
+    ]
 
-  #   principals {
-  #     type        = "AWS"
-  #     identifiers = [var.admin_user_arn]
-  #   }
-  # }
+    principals {
+      type        = "AWS"
+      identifiers = [data.aws_caller_identity.current.arn]
+    }
+  }
 }
 
 resource "aws_s3_bucket_policy" "s3_bucket_policy" {
-  bucket = module.s3_bucket.s3_bucket_id
+  # Attach newly created bucket policy to the S3 bucket, if `s3_attach_policy` is true. Otherwise, attach to the existing bucket specified by `s3_bucket_name`
+  bucket = var.s3_create_bucket ? module.s3_bucket.s3_bucket_id : var.s3_bucket_name
   policy = data.aws_iam_policy_document.s3_bucket.json
 }
 
@@ -87,98 +97,113 @@ resource "aws_s3_bucket_policy" "s3_bucket_policy" {
 #--------------------------#
 #        CLOUDFRONT        #
 #--------------------------#
-# module "cloudfront" {
-#   source  = "terraform-aws-modules/cloudfront/aws"
-#   version = "5.0.0"
+module "cloudfront" {
+  source  = "terraform-aws-modules/cloudfront/aws"
+  version = "6.4.0"
 
-#   count = 0
+  create = true
 
-#   aliases = var.cloudfront_config.aliases
+  # aliases = var.cloudfront_config.aliases
 
-#   comment             = "CloudFront distribution for PyPi index"
-#   enabled             = true
-#   staging             = false
-#   http_version        = var.cloudfront_config.http_version
-#   is_ipv6_enabled     = true
-#   price_class         = var.cloudfront_config.price_class
-#   retain_on_delete    = false
-#   wait_for_deployment = false
+  comment             = "CloudFront distribution for PyPi index"
+  enabled             = var.cloudfront_enabled
+  staging             = false
+  http_version        = var.cloudfront_http_version
+  is_ipv6_enabled     = true
+  price_class         = var.cloudfront_price_class
+  retain_on_delete    = false
+  wait_for_deployment = false
 
-#   continuous_deployment_policy_id = null
-#   create_monitoring_subscription  = false
+  continuous_deployment_policy_id = null
+  create_monitoring_subscription  = false
 
-#   # Access control
-#   create_origin_access_identity = false # This one is legacy one, prefer `create_origin_access_control`
-#   create_origin_access_control  = true
-#   origin_access_control = {
-#     s3_website_oac = {
-#       description      = "CloudFront access to S3"
-#       origin_type      = "s3"
-#       signing_behavior = "always"
-#       signing_protocol = "sigv4"
-#     }
-#   }
+  # Access control
+  origin_access_control = {
+    s3 = {
+      description      = "CloudFront access to S3"
+      origin_type      = "s3"
+      signing_behavior = "always"
+      signing_protocol = "sigv4"
+    }
+  }
 
-#   create_vpc_origin = false
+  # Origins
+  origin = {
+    s3_origin = {
+      domain_name           = module.s3_bucket.s3_bucket_bucket_regional_domain_name
+      origin_access_control = "s3" # Key from `origin_access_control` block
+    }
+  }
+  vpc_origin = {}
 
-#   origin = {
-#     s3_main_website = {
-#       domain_name           = module.s3_bucket.s3_bucket_bucket_regional_domain_name
-#       origin_access_control = "s3_website_oac"
-#     }
-#   }
+  # Cache behaviors
+  default_cache_behavior = {
+    path_pattern           = "/*"
+    target_origin_id       = "s3_origin"
+    viewer_protocol_policy = "redirect-to-https"
 
-#   default_cache_behavior = {
-#     path_pattern           = "/*"
-#     target_origin_id       = "s3_main_website"
-#     viewer_protocol_policy = "redirect-to-https"
+    allowed_methods = ["GET", "HEAD", "OPTIONS"]
+    cached_methods  = ["GET", "HEAD"]
 
-#     allowed_methods = ["GET", "HEAD", "OPTIONS"]
-#     cached_methods  = ["GET", "HEAD"]
+    # Using Cache/ResponseHeaders/OriginRequest policies is not allowed together with `compress` and `query_string` settings
+    compress     = true
+    query_string = true
 
-#     # Using Cache/ResponseHeaders/OriginRequest policies is not allowed together with `compress` and `query_string` settings
-#     compress     = true
-#     query_string = true
+    # Cache TTL
+    min_ttl     = var.cloudfront_ttl_min
+    default_ttl = var.cloudfront_ttl_default
+    max_ttl     = var.cloudfront_ttl_max
 
-#     # Cache TTL
-#     min_ttl     = var.cloudfront_config.cache_ttls.min
-#     default_ttl = var.cloudfront_config.cache_ttls.default
-#     max_ttl     = var.cloudfront_config.cache_ttls.max
+    # Forwarding config
+    use_forwarded_values = true
+    headers              = ["User-Agent"]
+    query_string         = false
+    cookies_forward      = "none"
 
-#     # Forwarding config
-#     use_forwarded_values = true
-#     headers              = ["User-Agent"]
-#     query_string         = false
-#     cookies_forward      = "none"
+    # Lambda@Edge functions
+    # lambda_function_association = {
+    #   # Valid keys: viewer-request, origin-request, viewer-response, origin-response
+    #   viewer-request = {
+    #     lambda_arn   = module.lambda_function.lambda_function_qualified_arn
+    #     include_body = true
+    #   }
 
-#     # Lambda@Edge / CloudFront Functions
-#     lambda_function_association = []
-#     function_association = {
-#       "viewer-request" = {
-#         function_arn = aws_cloudfront_function.website_index.arn
-#       }
-#     }
-#   }
+    #   origin-request = {
+    #     lambda_arn = module.lambda_function.lambda_function_qualified_arn
+    #   }
+    # }
+  }
 
-#   ordered_cache_behavior = []
+  ordered_cache_behavior = []
 
-#   viewer_certificate = {
-#     cloudfront_default_certificate = false
-#     acm_certificate_arn            = module.website_acm.acm_certificate_arn
-#     ssl_support_method             = "sni-only"
-#   }
+  restrictions = {
+    geo_restriction = {
+      restriction_type = "none"
+    }
+  }
 
-#   # custom_error_response = [{
-#   #   error_code         = 404
-#   #   response_code      = 404
-#   #   response_page_path = "/errors/404.html"
-#   #   }, {
-#   #   error_code         = 403
-#   #   response_code      = 403
-#   #   response_page_path = "/errors/403.html"
-#   # }]
+  viewer_certificate = {
+    cloudfront_default_certificate = var.cloudfront_use_acm_certificate ? false : true
+    # acm_certificate_arn            = module.website_acm.acm_certificate_arn
+    # ssl_support_method             = "sni-only"
+  }
+}
 
-#   geo_restriction = {
-#     restriction_type = "none"
-#   }
+
+
+# TODO
+# module "lambda_function" {
+#   source  = "terraform-aws-modules/lambda/aws"
+#   version = "~> 8.0"
+
+#   function_name = local.name
+#   description   = "My awesome lambda function"
+#   handler       = "index.lambda_handler"
+#   runtime       = "python3.11"
+
+#   publish        = true
+#   lambda_at_edge = true
+
+#   create_package         = false
+#   local_existing_package = local.downloaded
 # }
