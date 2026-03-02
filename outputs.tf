@@ -1,3 +1,13 @@
+# output "test" {
+#   value       = module.cloudfront
+#   description = "The ID of the CloudFront distribution"
+# }
+
+output "cloudfront_pypi_index_url" {
+  value       = module.cloudfront.cloudfront_distribution_domain_name
+  description = "The domain name of the CloudFront distribution"
+}
+
 output "s3_bucket_id" {
   value       = module.s3_bucket.s3_bucket_id
   description = "The name of the S3 bucket"

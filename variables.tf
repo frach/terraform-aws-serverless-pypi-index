@@ -1,22 +1,46 @@
+# CloudFront variables
+variable "cloudfront_enabled" {
+  description = "Whether to create CloudFront distribution or not"
+  type        = bool
+  default     = true
+}
 
-# Common variables
-# variable "cloudfront_ttl_min" {
-#   description = "Minimum TTL for CloudFront cache behavior"
-#   type        = number
-#   default     = 1 # Change it later to 3600 (1 hour) or more, but for testing purposes we want it to be low
-# }
+variable "cloudfront_http_version" {
+  description = "HTTP version for CloudFront distribution"
+  type        = string
+  default     = "http2"
+}
 
-# variable "cloudfront_ttl_default" {
-#   description = "Default TTL for CloudFront cache behavior"
-#   type        = number
-#   default     = 1 # Change later to 3600 (1 hour) or more, but for testing purposes we want it to be low
-# }
+variable "cloudfront_price_class" {
+  description = "Price class for CloudFront distribution"
+  type        = string
+  default     = "PriceClass_100"
+}
 
-# variable "cloudfront_ttl_max" {
-#   description = "Maximum TTL for CloudFront cache behavior"
-#   type        = number
-#   default     = 1 # Change it later to 86400 # 24 hours
-# }
+variable "cloudfront_ttl_min" {
+  description = "Minimum TTL for CloudFront cache behavior"
+  type        = number
+  default     = 1 # Change it later to 3600 (1 hour) or more, but for testing purposes we want it to be low
+}
+
+variable "cloudfront_ttl_default" {
+  description = "Default TTL for CloudFront cache behavior"
+  type        = number
+  default     = 1 # Change later to 3600 (1 hour) or more, but for testing purposes we want it to be low
+}
+
+variable "cloudfront_ttl_max" {
+  description = "Maximum TTL for CloudFront cache behavior"
+  type        = number
+  default     = 1 # Change it later to 86400 # 24 hours
+}
+
+variable "cloudfront_use_acm_certificate" {
+  description = "Whether to use ACM certificate for CloudFront distribution or not. If false, CloudFront default certificate will be used. Only false is supported for now"
+  type        = bool
+  default     = false
+}
+
 
 # S3 variables
 variable "s3_create_bucket" {
