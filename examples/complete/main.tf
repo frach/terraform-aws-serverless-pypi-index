@@ -10,6 +10,9 @@ provider "aws" {
 module "complete" {
   source = "../.."
 
+  # General configs
+  aws_region = "eu-west-1"
+
   # CloudFront configs
   cloudfront_ttl_min     = 0
   cloudfront_ttl_default = 1
