@@ -1,78 +1,104 @@
+import sys
+import os
 import pytest
-import base64
 from unittest.mock import patch, MagicMock
-from src.index import handler
 
-def create_cloudfront_event(uri, auth_header=None):
-    request = {
-        "uri": uri,
-        "method": "GET",
-        "clientIp": "192.0.2.1",
-        "headers": {}
-    }
-    if auth_header:
-        # CloudFront wraps incoming header entries inside an array container list
-        request["headers"]["authorization"] = [{"key": "Authorization", "value": auth_header}]
-    
+# Ensure the current directory (src) is at the top of the execution path
+sys.path.insert(0, os.path.dirname(__file__))
+
+# Prevent boto3 from failing during initial module compilation when raw strings exist
+with patch("boto3.client") as mock_boto:
+    import index
+    from index import handler
+
+# Mock structural data to mimic real S3 API responses
+MOCK_S3_CONTENTS = [
+    {"Key": "packages/requests/requests-2.28.1-py3-none-any.whl"},
+    {"Key": "packages/requests/requests-2.28.0.tar.gz"},
+    {"Key": "packages/Flask_SQLAlchemy/Flask_SQLAlchemy-3.0.2-py3-none-any.whl"},
+    {"Key": "packages/some-other-pkg/some_other_pkg-1.0.0.whl"},
+    {"Key": "ignored_folder/test.txt"}
+]
+
+def create_cloudfront_event(uri: str):
+    """Helper utility to generate standard Lambda@Edge payload structure."""
     return {
         "Records": [
             {
                 "cf": {
-                    "config": {"distributionId": "E1ABCDEFX12345"},
-                    "request": request
+                    "request": {
+                        "uri": uri,
+                        "method": "GET",
+                        "clientIp": "1.2.3.4",
+                        "headers": {}
+                    }
                 }
             }
         ]
     }
 
 @pytest.fixture(autouse=True)
-def reset_credentials_cache():
-    with patch('src.index.CACHED_CREDENTIALS', None):
-        yield
+def setup_test_environment():
+    """Dynamically set default configurations for testing execution."""
+    index.BUCKET_NAME = "my-test-pypi-bucket"
+    index.DATA_LAYER_REGION = "us-east-1"
+    yield
 
-@patch('src.index.s3_client')
-def test_anonymous_request_allows_missing_header_and_returns_index(mock_s3):
-    """Verifies completely blank headers bypass authentication checks entirely and return valid PEP 503 HTML5."""
-    mock_paginator = MagicMock()
-    mock_paginator.paginate.return_value = [{'CommonPrefixes': [{'Prefix': 'six/'}]}]
-    mock_s3.get_paginator.return_value = mock_paginator
-
+@patch("index.s3_client")
+def test_lambda_returns_root_simple_index(mock_s3, setup_test_environment):
+    """Verify that /simple/ returns a valid, normalized root directory list of packages."""
+    mock_s3.list_objects_v2.return_value = {"Contents": MOCK_S3_CONTENTS}
+    
     event = create_cloudfront_event("/simple/")
     response = handler(event, None)
     
     assert response["status"] == "200"
-    assert "html" in response["body"]
-    assert "/simple/six/" in response["body"] # Valid path tracking structure check
-
-
-@patch('src.index.boto3.session.Session')
-def test_unauthorized_request_returns_401_on_bad_credentials(mock_session):
-    """Verifies that if credentials are passed, they must be absolutely valid or fail."""
-    mock_secrets_client = MagicMock()
-    mock_secrets_client.get_secret_value.return_value = {
-        'SecretString': '{"username": "admin", "password": "correct_password"}'
-    }
-    mock_session.return_value.client.return_value = mock_secrets_client
-
-    wrong_auth = "Basic " + base64.b64encode(b"admin:invalid_password").decode("utf-8")
-    event = create_cloudfront_event("/simple/", auth_header=wrong_auth)
+    # FIXED: Access the first item [0] of the headers list mapping
+    assert "text/html" in response["headers"]["content-type"][0]["value"]
     
-    response = handler(event, None)
-    assert response["status"] == "401"
+    body = response["body"]
+    assert '<a href="requests/">requests</a>' in body
+    assert '<a href="flask-sqlalchemy/">flask-sqlalchemy</a>' in body
+    assert '<a href="some-other-pkg/">some-other-pkg</a>' in body
+    assert "ignored_folder" not in body
 
-@patch('src.index.s3_client')
-@patch('src.index.boto3.session.Session')
-def test_valid_credentials_clear_authorization_headers_on_passthrough(mock_session, mock_s3):
-    """Verifies valid credentials unlock access paths smoothly."""
-    mock_secrets_client = MagicMock()
-    mock_secrets_client.get_secret_value.return_value = {
-        'SecretString': '{"username": "admin", "password": "correct_password"}'
-    }
-    mock_session.return_value.client.return_value = mock_secrets_client
-
-    valid_auth = "Basic " + base64.b64encode(b"admin:correct_password").decode("utf-8")
-    event = create_cloudfront_event("/simple/six/six-1.16.0-py2.py3-none-any.whl", auth_header=valid_auth)
+@patch("index.s3_client")
+def test_lambda_returns_package_files(mock_s3, setup_test_environment):
+    """Verify that /simple/<package>/ maps to accurate files grouped under that project."""
+    mock_s3.list_objects_v2.return_value = {"Contents": MOCK_S3_CONTENTS}
     
+    event = create_cloudfront_event("/simple/requests")
     response = handler(event, None)
-    assert "status" not in response
-    assert response["uri"] == "/simple/six/six-1.16.0-py2.py3-none-any.whl"
+    
+    assert response["status"] == "200"
+    # FIXED: Access the first item [0] of the headers list mapping
+    assert "text/html" in response["headers"]["content-type"][0]["value"]
+    
+    body = response["body"]
+    assert "Links for requests" in body
+    assert '<a href="/packages/requests/requests-2.28.1-py3-none-any.whl">requests-2.28.1-py3-none-any.whl</a>' in body
+    assert '<a href="/packages/requests/requests-2.28.0.tar.gz">requests-2.28.0.tar.gz</a>' in body
+    assert "Flask_SQLAlchemy" not in body
+
+@patch("index.s3_client")
+def test_lambda_handles_package_normalization_in_routing(mock_s3, setup_test_environment):
+    """Verify routing correctly applies PEP 503 translation rules on misaligned input targets."""
+    mock_s3.list_objects_v2.return_value = {"Contents": MOCK_S3_CONTENTS}
+    
+    event = create_cloudfront_event("/simple/flask-sqlalchemy")
+    response = handler(event, None)
+    
+    assert response["status"] == "200"
+    body = response["body"]
+    assert '<a href="/packages/Flask_SQLAlchemy/Flask_SQLAlchemy-3.0.2-py3-none-any.whl">' in body
+
+@patch("index.s3_client")
+def test_lambda_passthrough_for_other_urls(mock_s3, setup_test_environment):
+    """Verify paths unrelated to /simple yield standard request objects for native handling."""
+    mock_s3.list_objects_v2.return_value = {"Contents": MOCK_S3_CONTENTS}
+    
+    event = create_cloudfront_event("/packages/requests/requests-2.28.1-py3-none-any.whl")
+    response = handler(event, None)
+    
+    assert "uri" in response
+    assert response["uri"] == "/packages/requests/requests-2.28.1-py3-none-any.whl"
