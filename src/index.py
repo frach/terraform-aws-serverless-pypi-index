@@ -1,10 +1,26 @@
-# Terraform string template variables
-DATA_LAYER_REGION = "${aws_region}" 
-BUCKET_NAME = "${bucket_name}"
-
 import os
+import json
 import re
 import boto3
+
+
+# Load configuration dynamically from the sidecar JSON file packaged by Terraform
+# This relies on the absolute path where the Lambda function executes
+current_dir = os.path.dirname(os.path.abspath(__file__))
+config_path = os.path.join(current_dir, "config.json")
+
+if os.path.exists(config_path):
+    with open(config_path, "r") as f:
+        CONFIG = json.load(f)
+else:
+    # Local development and testing fallback values
+    CONFIG = {
+        "aws_region": "us-east-1",
+        "bucket_name": "my-test-pypi-bucket"
+    }
+
+DATA_LAYER_REGION = CONFIG["aws_region"]
+BUCKET_NAME = CONFIG["bucket_name"]
 
 s3_client = boto3.client("s3", region_name=DATA_LAYER_REGION)
 
@@ -48,7 +64,7 @@ def generate_package_html(package_name: str, objects) -> str:
             if normalize_name(raw_package_name) == normalized_target and filename:
                 # Links point to the CloudFront distribution path where the actual S3 objects reside
                 links += f'<a href="/{key}">{filename}</a><br/>\n'
-                
+
     return f"<!DOCTYPE html>\n<html>\n  <head>\n    <title>Links for {package_name}</title>\n  </head>\n  <body>\n    <h1>Links for {package_name}</h1>\n    {links}  </body>\n</html>"
 
 

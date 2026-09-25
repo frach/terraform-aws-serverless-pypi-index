@@ -206,6 +206,14 @@ module "cloudfront" {
 #--------------------------#
 #          LAMBDA          #
 #--------------------------#
+resource "local_file" "lambda_config" {
+  filename = "${path.module}/src/config.json"
+  content  = jsonencode({
+    aws_region  = var.aws_region
+    bucket_name = module.s3_bucket.s3_bucket_id
+  })
+}
+
 module "lambda_function" {
   source  = "terraform-aws-modules/lambda/aws"
   version = "~> 8.0"
@@ -220,24 +228,29 @@ module "lambda_function" {
   description   = "Dynamic PEP 503 compliant HTML generator and optional basic authentication proxy"
   handler       = "index.handler"
   runtime       = "python3.12"
-  
+
   # Absolute architectural requirements for running lambda at the edge
   publish        = true
   lambda_at_edge = true
   create_package = true
-  
-  # ENHANCED TEMPLATING WORKFLOW: Injecting IaC outputs directly into Python source code
+
+  # Point directly to the directory. This guarantees index.py and config.json 
+  # sit together at the root of the compiled ZIP.
   source_path = [
     {
       path = "${path.module}/src"
-      commands = [":zip"]
+      
+      # Use patterns with native regex exclusion rules:
+      patterns = [
+        "!test_index\\.py",
+        "!__pycache__/.*",
+        "!.pytest_cache/.*"
+      ]
 
-      # Variables seamlessly rendered on-the-fly before packaging into ZIP format
-      template_dir = {
-        vars = {
-          bucket_name = var.s3_bucket_name   # Resolves to your exact deployed bucket string
-          aws_region  = var.aws_region       # Forces connection back to your main region (e.g., eu-west-1)
-        }
+      # Force a zip rebuilding sequence if config.json contents shift
+      triggers = {
+        index_sha  = sha256("${path.module}/src/index.py")
+        config_sha = sha256(local_file.lambda_config.content)
       }
     }
   ]
