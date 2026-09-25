@@ -11,6 +11,18 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 
+# Python / Pytest
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+ENV/
+dist/
+build/
+*.egg-info/
+
 # Crash log files
 crash.log
 
@@ -23,3 +35,4 @@ __pycache__/
 # Editors files
 .DS_Store
 .idea
+Thumbs.db
