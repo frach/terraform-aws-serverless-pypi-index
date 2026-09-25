@@ -162,16 +162,11 @@ module "cloudfront" {
 
   # Cache behaviors
   default_cache_behavior = {
-    path_pattern           = "/*"
     target_origin_id       = "s3_origin"
     viewer_protocol_policy = "redirect-to-https"
 
     allowed_methods = ["GET", "HEAD", "OPTIONS"]
     cached_methods  = ["GET", "HEAD"]
-
-    # Using Cache/ResponseHeaders/OriginRequest policies is not allowed together with `compress` and `query_string` settings
-    compress     = true
-    query_string = true
 
     # Cache key optimizations
     cache_policy_id          = data.aws_cloudfront_cache_policy.caching_optimized.id
@@ -182,22 +177,12 @@ module "cloudfront" {
     default_ttl = var.cloudfront_ttl_default
     max_ttl     = var.cloudfront_ttl_max
 
-    # Forwarding config
-    use_forwarded_values = true
-    headers              = ["User-Agent"]
-    query_string         = false
-    cookies_forward      = "none"
-
     # Lambda@Edge functions
     lambda_function_association = {
       # Valid keys: viewer-request, origin-request, viewer-response, origin-response
       viewer-request = {
         lambda_arn   = module.lambda_function.lambda_function_qualified_arn
         include_body = true
-      }
-
-      origin-request = {
-        lambda_arn = module.lambda_function.lambda_function_qualified_arn
       }
     }
   }
