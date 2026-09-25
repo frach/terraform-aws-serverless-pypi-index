@@ -41,6 +41,6 @@ module "complete" {
 }
 
 
-# output "test" {
-#   value = module.complete
-# }
+output "test" {
+  value = module.complete
+}
