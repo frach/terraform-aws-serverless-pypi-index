@@ -11,13 +11,14 @@ with patch("boto3.client") as mock_boto:
     import index
     from index import handler
 
-# Mock structural data to mimic real S3 API responses
+# Mock structural data updated to match your actual flat S3 bucket layout
 MOCK_S3_CONTENTS = [
-    {"Key": "packages/requests/requests-2.28.1-py3-none-any.whl"},
-    {"Key": "packages/requests/requests-2.28.0.tar.gz"},
-    {"Key": "packages/Flask_SQLAlchemy/Flask_SQLAlchemy-3.0.2-py3-none-any.whl"},
-    {"Key": "packages/some-other-pkg/some_other_pkg-1.0.0.whl"},
-    {"Key": "ignored_folder/test.txt"}
+    {"Key": "six/six-1.17.0-py2.py3-none-any.whl"},
+    {"Key": "requests/requests-2.28.1-py3-none-any.whl"},
+    {"Key": "requests/requests-2.28.0.tar.gz"},
+    {"Key": "Flask_SQLAlchemy/Flask_SQLAlchemy-3.0.2-py3-none-any.whl"},
+    {"Key": "some-other-pkg/some_other_pkg-1.0.0.whl"},
+    {"Key": "root_level_ignored.txt"}  # Files at root with no folder split are skipped
 ]
 
 def create_cloudfront_event(uri: str):
@@ -40,7 +41,7 @@ def create_cloudfront_event(uri: str):
 @pytest.fixture(autouse=True)
 def setup_test_environment():
     """Dynamically set default configurations for testing execution."""
-    index.BUCKET_NAME = "my-test-pypi-bucket"
+    index.BUCKET_NAME = "terraform-b31a35574fb1b63ac4e6cf477f"
     index.DATA_LAYER_REGION = "us-east-1"
     yield
 
@@ -53,31 +54,31 @@ def test_lambda_returns_root_simple_index(mock_s3, setup_test_environment):
     response = handler(event, None)
     
     assert response["status"] == "200"
-    # FIXED: Access the first item [0] of the headers list mapping
+    # FIXED: Aligned with your exact list array element evaluation syntax [0]
     assert "text/html" in response["headers"]["content-type"][0]["value"]
     
     body = response["body"]
+    assert '<a href="six/">six</a>' in body
     assert '<a href="requests/">requests</a>' in body
     assert '<a href="flask-sqlalchemy/">flask-sqlalchemy</a>' in body
     assert '<a href="some-other-pkg/">some-other-pkg</a>' in body
-    assert "ignored_folder" not in body
+    assert "root_level_ignored" not in body
 
 @patch("index.s3_client")
 def test_lambda_returns_package_files(mock_s3, setup_test_environment):
     """Verify that /simple/<package>/ maps to accurate files grouped under that project."""
     mock_s3.list_objects_v2.return_value = {"Contents": MOCK_S3_CONTENTS}
     
-    event = create_cloudfront_event("/simple/requests")
+    event = create_cloudfront_event("/simple/six")
     response = handler(event, None)
     
     assert response["status"] == "200"
-    # FIXED: Access the first item [0] of the headers list mapping
+    # FIXED: Aligned with your list array element evaluation syntax [0]
     assert "text/html" in response["headers"]["content-type"][0]["value"]
     
     body = response["body"]
-    assert "Links for requests" in body
-    assert '<a href="/packages/requests/requests-2.28.1-py3-none-any.whl">requests-2.28.1-py3-none-any.whl</a>' in body
-    assert '<a href="/packages/requests/requests-2.28.0.tar.gz">requests-2.28.0.tar.gz</a>' in body
+    assert "Links for six" in body
+    assert '<a href="/six/six-1.17.0-py2.py3-none-any.whl">six-1.17.0-py2.py3-none-any.whl</a>' in body
     assert "Flask_SQLAlchemy" not in body
 
 @patch("index.s3_client")
@@ -90,15 +91,15 @@ def test_lambda_handles_package_normalization_in_routing(mock_s3, setup_test_env
     
     assert response["status"] == "200"
     body = response["body"]
-    assert '<a href="/packages/Flask_SQLAlchemy/Flask_SQLAlchemy-3.0.2-py3-none-any.whl">' in body
+    assert '<a href="/Flask_SQLAlchemy/Flask_SQLAlchemy-3.0.2-py3-none-any.whl">' in body
 
 @patch("index.s3_client")
 def test_lambda_passthrough_for_other_urls(mock_s3, setup_test_environment):
     """Verify paths unrelated to /simple yield standard request objects for native handling."""
     mock_s3.list_objects_v2.return_value = {"Contents": MOCK_S3_CONTENTS}
     
-    event = create_cloudfront_event("/packages/requests/requests-2.28.1-py3-none-any.whl")
+    event = create_cloudfront_event("/six/six-1.17.0-py2.py3-none-any.whl")
     response = handler(event, None)
     
     assert "uri" in response
-    assert response["uri"] == "/packages/requests/requests-2.28.1-py3-none-any.whl"
+    assert response["uri"] == "/six/six-1.17.0-py2.py3-none-any.whl"

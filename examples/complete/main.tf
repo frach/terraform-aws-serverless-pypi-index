@@ -42,8 +42,3 @@ module "complete" {
     mfa_delete = false
   }
 }
-
-
-output "test" {
-  value = module.complete
-}

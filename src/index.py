@@ -25,54 +25,72 @@ BUCKET_NAME = CONFIG["bucket_name"]
 s3_client = boto3.client("s3", region_name=DATA_LAYER_REGION)
 
 
+# Normalize package names according to PEP 503.
 def normalize_name(name: str) -> str:
-    """Normalize package names according to PEP 503."""
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+# Extract unique, normalized package names from flat S3 keys (package/file).
 def get_all_packages(objects) -> set:
-    """Extract unique, normalized package names from S3 keys."""
     packages = set()
     for obj in objects:
         key = obj.get("Key", "")
-        # Expected S3 format: packages/package_name/file.whl
-        if key.startswith("packages/") and len(key.split("/")) >= 3:
+        if "/" in key:
             parts = key.split("/")
-            raw_package_name = parts[1]
-            packages.add(normalize_name(raw_package_name))
+            # A valid file has at least a folder name and a file name component
+            if len(parts) >= 2 and parts[-1]:
+                raw_package_name = parts[0]
+                packages.add(normalize_name(raw_package_name))
     return packages
 
 
+# Generate the root PEP 503 index page (/simple/).
 def generate_root_html(packages: set) -> str:
-    """Generate the root PEP 503 index page (/simple/)."""
-    links = "".join(f'<a href="{pkg}/">{pkg}</a><br/>\n' for pkg in sorted(packages))
-    return f"<!DOCTYPE html>\n<html>\n  <head>\n    <title>Simple Index</title>\n  </head>\n  <body>\n    {links}  </body>\n</html>"
+    links = "".join(f'    <a href="{pkg}/">{pkg}</a><br/>\n' for pkg in sorted(packages))
+
+    return f"""<!DOCTYPE html>
+<html>
+  <head>
+    <title>Simple Index</title>
+  </head>
+  <body>
+{links}  </body>
+</html>"""
 
 
+# Generate the file index page for a specific package from flat S3 layout.
 def generate_package_html(package_name: str, objects) -> str:
-    """Generate the file index page for a specific package (/simple/package-name/)."""
     links = ""
     normalized_target = normalize_name(package_name)
     
     for obj in objects:
         key = obj.get("Key", "")
-        if key.startswith("packages/") and len(key.split("/")) >= 3:
+        if "/" in key:
             parts = key.split("/")
-            raw_package_name = parts[1]
-            filename = parts[-1]
-            
-            if normalize_name(raw_package_name) == normalized_target and filename:
-                # Links point to the CloudFront distribution path where the actual S3 objects reside
-                links += f'<a href="/{key}">{filename}</a><br/>\n'
+            if len(parts) >= 2 and parts[-1]:
+                raw_package_name = parts[0]
+                filename = parts[-1]
+                
+                if normalize_name(raw_package_name) == normalized_target:
+                    links += f'    <a href="/{key}">{filename}</a><br/>\n'
+                
+    return f"""<!DOCTYPE html>
+<html>
+  <head>
+    <title>Links for {package_name}</title>
+  </head>
+  <body>
+    <h1>Links for {package_name}</h1>
+{links}
+  </body>
+</html>"""
 
-    return f"<!DOCTYPE html>\n<html>\n  <head>\n    <title>Links for {package_name}</title>\n  </head>\n  <body>\n    <h1>Links for {package_name}</h1>\n    {links}  </body>\n</html>"
 
-
+# MAIN HANDLER
 def handler(event, context):
     request = event["Records"][0]["cf"]["request"]
     uri = request["uri"].strip("/")
     
-    # Handle missing bucket environment variable configuration
     if not BUCKET_NAME or BUCKET_NAME.startswith("${"):
         return {
             "status": "500",
@@ -81,9 +99,8 @@ def handler(event, context):
             "body": "Missing BUCKET_NAME template configuration."
         }
 
-    # Fetch objects from S3 under the 'packages/' prefix
     try:
-        response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix="packages/")
+        response = s3_client.list_objects_v2(Bucket=BUCKET_NAME)
         objects = response.get("Contents", [])
     except Exception as e:
         return {
@@ -93,9 +110,9 @@ def handler(event, context):
             "body": f"S3 Error: {str(e)}"
         }
 
-    # Routing logic
-    parts = uri.split("/")
-    
+    # Clean empty strings from split lists to handle trailing slashes robustly
+    parts = [p for p in uri.split("/") if p]
+
     # Case 1: Root simple index page (/simple or /simple/)
     if len(parts) == 1 and parts[0] == "simple":
         packages = get_all_packages(objects)
@@ -106,8 +123,8 @@ def handler(event, context):
             "headers": {"content-type": [{"key": "Content-Type", "value": "text/html; charset=utf-8"}]},
             "body": html_content
         }
-        
-    # Case 2: Specific package file index page (/simple/package-name)
+
+    # Case 2: Specific package file index page (/simple/package-name or /simple/package-name/)
     elif len(parts) == 2 and parts[0] == "simple":
         package_name = parts[1]
         html_content = generate_package_html(package_name, objects)
@@ -118,5 +135,4 @@ def handler(event, context):
             "body": html_content
         }
 
-    # If the URL path does not match the /simple standard, allow standard passthrough (e.g., direct download from S3)
     return request
