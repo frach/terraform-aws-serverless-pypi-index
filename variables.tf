@@ -1,3 +1,9 @@
+variable "aws_region" {
+  type        = string
+  default     = "eu-central-1"
+  description = "The primary AWS region where the S3 storage bucket and Secrets Manager will be deployed."
+}
+
 # CloudFront variables
 variable "cloudfront_enabled" {
   description = "Whether to create CloudFront distribution or not"

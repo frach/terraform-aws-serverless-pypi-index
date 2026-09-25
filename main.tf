@@ -3,7 +3,23 @@ data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
 locals {
+  resources_name_prefix = "serverless-pypi-index"
   s3_bucket_arn = var.s3_create_bucket ? module.s3_bucket.s3_bucket_arn : "arn:${data.aws_partition.current.partition}:s3:::${var.s3_bucket_name}"
+}
+
+
+#---------------------------#
+#         PROVIDERS         #
+#---------------------------#
+# Default provider for persistent resources (S3, Secrets Manager)
+provider "aws" {
+  region = var.aws_region
+}
+
+# Dedicated provider for Lambda@Edge (CloudFront strictly requires us-east-1)
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
 }
 
 
@@ -161,17 +177,17 @@ module "cloudfront" {
     cookies_forward      = "none"
 
     # Lambda@Edge functions
-    # lambda_function_association = {
-    #   # Valid keys: viewer-request, origin-request, viewer-response, origin-response
-    #   viewer-request = {
-    #     lambda_arn   = module.lambda_function.lambda_function_qualified_arn
-    #     include_body = true
-    #   }
+    lambda_function_association = {
+      # Valid keys: viewer-request, origin-request, viewer-response, origin-response
+      viewer-request = {
+        lambda_arn   = module.lambda_function.lambda_function_qualified_arn
+        include_body = true
+      }
 
-    #   origin-request = {
-    #     lambda_arn = module.lambda_function.lambda_function_qualified_arn
-    #   }
-    # }
+      origin-request = {
+        lambda_arn = module.lambda_function.lambda_function_qualified_arn
+      }
+    }
   }
 
   ordered_cache_behavior = []
@@ -190,20 +206,87 @@ module "cloudfront" {
 }
 
 
+#--------------------------#
+#          LAMBDA          #
+#--------------------------#
+module "lambda_function" {
+  source  = "terraform-aws-modules/lambda/aws"
+  version = "~> 8.0"
 
-# TODO
-# module "lambda_function" {
-#   source  = "terraform-aws-modules/lambda/aws"
-#   version = "~> 8.0"
+  # Enforce deployment in us-east-1 (CloudFront global constraint for Edge computing)
+  # Ensure you define this alias in your provider configuration block
+  providers = {
+    aws = aws.us_east_1
+  }
 
-#   function_name = local.name
-#   description   = "My awesome lambda function"
-#   handler       = "index.lambda_handler"
-#   runtime       = "python3.11"
+  function_name = "${local.resources_name_prefix}-edge-router"
+  description   = "Dynamic PEP 503 compliant HTML generator and optional basic authentication proxy"
+  handler       = "index.handler"
+  runtime       = "python3.12"
+  
+  # Absolute architectural requirements for running lambda at the edge
+  publish        = true
+  lambda_at_edge = true
+  create_package = true
+  
+  # ENHANCED TEMPLATING WORKFLOW: Injecting IaC outputs directly into Python source code
+  source_path = [
+    {
+      path = "${path.module}/src"
+      
+      # The module matches tokens inside Python files with keys specified below
+      commands = [
+        ":zip"
+      ]
 
-#   publish        = true
-#   lambda_at_edge = true
+      # Variables seamlessly rendered on-the-fly before packaging into ZIP format
+      template_dir = {
+        vars = {
+          secret_name = aws_secretsmanager_secret.pypi_creds.name
+          bucket_name = var.s3_bucket_name   # Resolves to your exact deployed bucket string
+          aws_region  = var.aws_region       # Forces connection back to your main region (e.g., eu-west-1)
+        }
+      }
+    }
+  ]
 
-#   create_package         = false
-#   local_existing_package = local.downloaded
-# }
+  # Inline IAM Policy granting explicit least-privilege cross-service permissions
+  attach_policy_json = true
+  policy_json = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      # {
+      #   Sid      = "AllowSecretsManagerRead"
+      #   Effect   = "Allow"
+      #   Action   = ["secretsmanager:GetSecretValue"]
+      #   # Pins runtime decryption permissions strictly to your deployed secret instance
+      #   Resource = aws_secretsmanager_secret.pypi_creds.arn
+      # },
+      {
+        Sid      = "AllowS3BucketListing"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = local.s3_bucket_arn
+      },
+      {
+        Sid      = "AllowS3ArtifactRetrieval"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${local.s3_bucket_arn}/*"
+      }
+    ]
+  })
+}
+
+
+#--------------------------#
+#         SECRETS          #
+#--------------------------#
+resource "aws_secretsmanager_secret" "pypi_creds" {
+  # Używa regionu domyślnego (np. eu-west-1). Nazwa musi pasować do var.project_name
+  name        = "${local.resources_name_prefix}-credentials"
+  description = "Basic authentication credentials for the private serverless PyPi index proxy"
+  
+  # Opcjonalnie: pozwala na natychmiastowe usunięcie sekretu podczas testów (bez okresu karencji)
+  recovery_window_in_days = 0 
+}
