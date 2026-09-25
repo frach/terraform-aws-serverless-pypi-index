@@ -2,6 +2,14 @@ data "aws_caller_identity" "current" {}
 
 data "aws_partition" "current" {}
 
+data "aws_cloudfront_cache_policy" "caching_optimized" {
+  name = "Managed-CachingOptimized"
+}
+
+data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
+  name = "Managed-AllViewerExceptHostHeader"
+}
+
 locals {
   resources_name_prefix = "serverless-pypi-index"
   s3_bucket_arn = var.s3_create_bucket ? module.s3_bucket.s3_bucket_arn : "arn:${data.aws_partition.current.partition}:s3:::${var.s3_bucket_name}"
@@ -135,7 +143,7 @@ module "cloudfront" {
 
   # Access control
   origin_access_control = {
-    s3 = {
+    s3_oac = {
       description      = "CloudFront access to S3"
       origin_type      = "s3"
       signing_behavior = "always"
@@ -147,7 +155,7 @@ module "cloudfront" {
   origin = {
     s3_origin = {
       domain_name           = module.s3_bucket.s3_bucket_bucket_regional_domain_name
-      origin_access_control = "s3" # Key from `origin_access_control` block
+      origin_access_control = "s3_oac" # Key from `origin_access_control` block
     }
   }
   vpc_origin = {}
@@ -164,6 +172,10 @@ module "cloudfront" {
     # Using Cache/ResponseHeaders/OriginRequest policies is not allowed together with `compress` and `query_string` settings
     compress     = true
     query_string = true
+
+    # Cache key optimizations
+    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_optimized.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
 
     # Cache TTL
     min_ttl     = var.cloudfront_ttl_min
@@ -219,7 +231,7 @@ module "lambda_function" {
     aws = aws.us_east_1
   }
 
-  function_name = "${local.resources_name_prefix}-edge-router"
+  function_name = "${local.resources_name_prefix}-edge-router-v2"     # TODO change it back
   description   = "Dynamic PEP 503 compliant HTML generator and optional basic authentication proxy"
   handler       = "index.handler"
   runtime       = "python3.12"
@@ -233,11 +245,7 @@ module "lambda_function" {
   source_path = [
     {
       path = "${path.module}/src"
-      
-      # The module matches tokens inside Python files with keys specified below
-      commands = [
-        ":zip"
-      ]
+      commands = [":zip"]
 
       # Variables seamlessly rendered on-the-fly before packaging into ZIP format
       template_dir = {
@@ -255,13 +263,13 @@ module "lambda_function" {
   policy_json = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      # {
-      #   Sid      = "AllowSecretsManagerRead"
-      #   Effect   = "Allow"
-      #   Action   = ["secretsmanager:GetSecretValue"]
-      #   # Pins runtime decryption permissions strictly to your deployed secret instance
-      #   Resource = aws_secretsmanager_secret.pypi_creds.arn
-      # },
+      {
+        Sid      = "AllowSecretsManagerRead"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        # Pins runtime decryption permissions strictly to your deployed secret instance
+        Resource = aws_secretsmanager_secret.pypi_creds.arn
+      },
       {
         Sid      = "AllowS3BucketListing"
         Effect   = "Allow"
@@ -283,10 +291,9 @@ module "lambda_function" {
 #         SECRETS          #
 #--------------------------#
 resource "aws_secretsmanager_secret" "pypi_creds" {
-  # Używa regionu domyślnego (np. eu-west-1). Nazwa musi pasować do var.project_name
   name        = "${local.resources_name_prefix}-credentials"
   description = "Basic authentication credentials for the private serverless PyPi index proxy"
   
-  # Opcjonalnie: pozwala na natychmiastowe usunięcie sekretu podczas testów (bez okresu karencji)
+  # During terraform destroy works immediately
   recovery_window_in_days = 0 
 }
