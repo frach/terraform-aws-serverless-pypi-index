@@ -216,7 +216,7 @@ module "lambda_function" {
     aws = aws.us_east_1
   }
 
-  function_name = "${local.resources_name_prefix}-edge-router-v2"     # TODO change it back
+  function_name = "${local.resources_name_prefix}-edge-router-v4"     # TODO change it back
   description   = "Dynamic PEP 503 compliant HTML generator and optional basic authentication proxy"
   handler       = "index.handler"
   runtime       = "python3.12"
@@ -235,7 +235,6 @@ module "lambda_function" {
       # Variables seamlessly rendered on-the-fly before packaging into ZIP format
       template_dir = {
         vars = {
-          secret_name = aws_secretsmanager_secret.pypi_creds.name
           bucket_name = var.s3_bucket_name   # Resolves to your exact deployed bucket string
           aws_region  = var.aws_region       # Forces connection back to your main region (e.g., eu-west-1)
         }
@@ -248,13 +247,6 @@ module "lambda_function" {
   policy_json = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      {
-        Sid      = "AllowSecretsManagerRead"
-        Effect   = "Allow"
-        Action   = ["secretsmanager:GetSecretValue"]
-        # Pins runtime decryption permissions strictly to your deployed secret instance
-        Resource = aws_secretsmanager_secret.pypi_creds.arn
-      },
       {
         Sid      = "AllowS3BucketListing"
         Effect   = "Allow"
@@ -269,16 +261,4 @@ module "lambda_function" {
       }
     ]
   })
-}
-
-
-#--------------------------#
-#         SECRETS          #
-#--------------------------#
-resource "aws_secretsmanager_secret" "pypi_creds" {
-  name        = "${local.resources_name_prefix}-credentials"
-  description = "Basic authentication credentials for the private serverless PyPi index proxy"
-  
-  # During terraform destroy works immediately
-  recovery_window_in_days = 0 
 }
