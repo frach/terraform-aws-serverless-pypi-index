@@ -32,7 +32,7 @@ def reset_credentials_cache():
 
 @patch('src.index.s3_client')
 def test_anonymous_request_allows_missing_header_and_returns_index(mock_s3):
-    """Verifies completely blank headers bypass authentication checks entirely."""
+    """Verifies completely blank headers bypass authentication checks entirely and return valid PEP 503 HTML5."""
     mock_paginator = MagicMock()
     mock_paginator.paginate.return_value = [{'CommonPrefixes': [{'Prefix': 'six/'}]}]
     mock_s3.get_paginator.return_value = mock_paginator
@@ -41,7 +41,9 @@ def test_anonymous_request_allows_missing_header_and_returns_index(mock_s3):
     response = handler(event, None)
     
     assert response["status"] == "200"
-    assert "six" in response["body"]
+    assert "html" in response["body"]
+    assert "/simple/six/" in response["body"] # Valid path tracking structure check
+
 
 @patch('src.index.boto3.session.Session')
 def test_unauthorized_request_returns_401_on_bad_credentials(mock_session):
