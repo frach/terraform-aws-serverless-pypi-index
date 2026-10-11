@@ -11,11 +11,16 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 
+# Local tool binaries
+bin/
+
 # Python / Pytest
 __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
+.coverage
+htmlcov/
 .venv/
 venv/
 ENV/

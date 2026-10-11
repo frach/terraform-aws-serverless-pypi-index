@@ -3,7 +3,6 @@ import json
 import re
 import boto3
 
-
 # Load configuration dynamically from the sidecar JSON file packaged by Terraform
 # This relies on the absolute path where the Lambda function executes
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -14,10 +13,7 @@ if os.path.exists(config_path):
         CONFIG = json.load(f)
 else:
     # Local development and testing fallback values
-    CONFIG = {
-        "aws_region": "us-east-1",
-        "bucket_name": "my-test-pypi-bucket"
-    }
+    CONFIG = {"aws_region": "us-east-1", "bucket_name": "my-test-pypi-bucket"}
 
 DATA_LAYER_REGION = CONFIG["aws_region"]
 BUCKET_NAME = CONFIG["bucket_name"]
@@ -46,7 +42,9 @@ def get_all_packages(objects) -> set:
 
 # Generate the root PEP 503 index page (/simple/).
 def generate_root_html(packages: set) -> str:
-    links = "".join(f'    <a href="{pkg}/">{pkg}</a><br/>\n' for pkg in sorted(packages))
+    links = "".join(
+        f'    <a href="{pkg}/">{pkg}</a><br/>\n' for pkg in sorted(packages)
+    )
 
     return f"""<!DOCTYPE html>
 <html>
@@ -62,7 +60,7 @@ def generate_root_html(packages: set) -> str:
 def generate_package_html(package_name: str, objects) -> str:
     links = ""
     normalized_target = normalize_name(package_name)
-    
+
     for obj in objects:
         key = obj.get("Key", "")
         if "/" in key:
@@ -70,10 +68,10 @@ def generate_package_html(package_name: str, objects) -> str:
             if len(parts) >= 2 and parts[-1]:
                 raw_package_name = parts[0]
                 filename = parts[-1]
-                
+
                 if normalize_name(raw_package_name) == normalized_target:
                     links += f'    <a href="/{key}">{filename}</a><br/>\n'
-                
+
     return f"""<!DOCTYPE html>
 <html>
   <head>
@@ -90,13 +88,15 @@ def generate_package_html(package_name: str, objects) -> str:
 def handler(event, context):
     request = event["Records"][0]["cf"]["request"]
     uri = request["uri"].strip("/")
-    
+
     if not BUCKET_NAME or BUCKET_NAME.startswith("${"):
         return {
             "status": "500",
             "statusDescription": "Internal Server Error",
-            "headers": {"content-type": [{"key": "Content-Type", "value": "text/html"}]},
-            "body": "Missing BUCKET_NAME template configuration."
+            "headers": {
+                "content-type": [{"key": "Content-Type", "value": "text/html"}]
+            },
+            "body": "Missing BUCKET_NAME template configuration.",
         }
 
     try:
@@ -106,8 +106,10 @@ def handler(event, context):
         return {
             "status": "500",
             "statusDescription": "Internal Server Error",
-            "headers": {"content-type": [{"key": "Content-Type", "value": "text/html"}]},
-            "body": f"S3 Error: {str(e)}"
+            "headers": {
+                "content-type": [{"key": "Content-Type", "value": "text/html"}]
+            },
+            "body": f"S3 Error: {str(e)}",
         }
 
     # Clean empty strings from split lists to handle trailing slashes robustly
@@ -120,8 +122,12 @@ def handler(event, context):
         return {
             "status": "200",
             "statusDescription": "OK",
-            "headers": {"content-type": [{"key": "Content-Type", "value": "text/html; charset=utf-8"}]},
-            "body": html_content
+            "headers": {
+                "content-type": [
+                    {"key": "Content-Type", "value": "text/html; charset=utf-8"}
+                ]
+            },
+            "body": html_content,
         }
 
     # Case 2: Specific package file index page (/simple/package-name or /simple/package-name/)
@@ -131,8 +137,12 @@ def handler(event, context):
         return {
             "status": "200",
             "statusDescription": "OK",
-            "headers": {"content-type": [{"key": "Content-Type", "value": "text/html; charset=utf-8"}]},
-            "body": html_content
+            "headers": {
+                "content-type": [
+                    {"key": "Content-Type", "value": "text/html; charset=utf-8"}
+                ]
+            },
+            "body": html_content,
         }
 
     return request
