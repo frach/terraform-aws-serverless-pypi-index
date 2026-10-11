@@ -1,29 +1,32 @@
 repos:
   - repo: https://github.com/antonbabenko/pre-commit-terraform
-    rev: v1.105.0
+    rev: v1.109.2
     hooks:
       - id: terraform_fmt
       - id: terraform_docs
         args:
-          - '--args=--lockfile=false'
+          # renovate: datasource=github-releases depName=terraform-docs/terraform-docs
+          - --hook-config=--tool-version=0.24.0
+          - --args=--config=.terraform-docs.yml
+        exclude: ^examples/
       - id: terraform_tflint
         args:
-          - '--args=--only=terraform_deprecated_interpolation'
-          - '--args=--only=terraform_deprecated_index'
-          - '--args=--only=terraform_unused_declarations'
-          - '--args=--only=terraform_comment_syntax'
-          - '--args=--only=terraform_documented_outputs'
-          - '--args=--only=terraform_documented_variables'
-          - '--args=--only=terraform_typed_variables'
-          - '--args=--only=terraform_module_pinned_source'
-          - '--args=--only=terraform_naming_convention'
-          - '--args=--only=terraform_required_version'
-          - '--args=--only=terraform_required_providers'
-          - '--args=--only=terraform_standard_module_structure'
+          # renovate: datasource=github-releases depName=terraform-linters/tflint
+          - --hook-config=--tool-version=0.64.0
+          - --args=--config=__GIT_WORKING_DIR__/.tflint.hcl
       - id: terraform_validate
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
       - id: check-merge-conflict
+      - id: check-yaml
       - id: end-of-file-fixer
       - id: trailing-whitespace
+        exclude: \.md$
+
+  - repo: https://github.com/psf/black
+    rev: 26.10.1
+    hooks:
+      - id: black
+        files: ^src/

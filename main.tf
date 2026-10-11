@@ -12,7 +12,7 @@ data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
 
 locals {
   resources_name_prefix = "serverless-pypi-index"
-  s3_bucket_arn = var.s3_create_bucket ? module.s3_bucket.s3_bucket_arn : "arn:${data.aws_partition.current.partition}:s3:::${var.s3_bucket_name}"
+  s3_bucket_arn         = var.s3_create_bucket ? module.s3_bucket.s3_bucket_arn : "arn:${data.aws_partition.current.partition}:s3:::${var.s3_bucket_name}"
 }
 
 
@@ -22,6 +22,8 @@ locals {
 # Default provider for persistent resources (S3, Secrets Manager)
 provider "aws" {
   region = var.aws_region
+
+
 }
 
 # Dedicated provider for Lambda@Edge (CloudFront strictly requires us-east-1)
@@ -208,7 +210,7 @@ module "cloudfront" {
 #--------------------------#
 resource "local_file" "lambda_config" {
   filename = "${path.module}/src/config.json"
-  content  = jsonencode({
+  content = jsonencode({
     aws_region  = var.aws_region
     bucket_name = module.s3_bucket.s3_bucket_id
   })
@@ -224,7 +226,7 @@ module "lambda_function" {
     aws = aws.us_east_1
   }
 
-  function_name = "${local.resources_name_prefix}-edge-router-v4"     # TODO change it back
+  function_name = "${local.resources_name_prefix}-edge-router-v4" # TODO change it back
   description   = "Dynamic PEP 503 compliant HTML generator and optional basic authentication proxy"
   handler       = "index.handler"
   runtime       = "python3.12"
@@ -234,12 +236,12 @@ module "lambda_function" {
   lambda_at_edge = true
   create_package = true
 
-  # Point directly to the directory. This guarantees index.py and config.json 
+  # Point directly to the directory. This guarantees index.py and config.json
   # sit together at the root of the compiled ZIP.
   source_path = [
     {
       path = "${path.module}/src"
-      
+
       # Use patterns with native regex exclusion rules:
       patterns = [
         "!test_index\\.py",
