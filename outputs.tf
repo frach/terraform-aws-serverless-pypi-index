@@ -24,8 +24,8 @@ output "s3_bucket_domain_name" {
 }
 
 output "s3_bucket_policy" {
-  value       = aws_s3_bucket_policy.s3_bucket_policy.id
-  description = "The ID of the S3 bucket policy"
+  value       = var.s3_create_bucket ? module.s3_bucket.s3_bucket_policy : aws_s3_bucket_policy.s3_bucket_policy[0].policy
+  description = "The bucket policy JSON attached by this module (merged with the optional deny policies for a created bucket)"
 }
 
 output "auth_secret_arn" {

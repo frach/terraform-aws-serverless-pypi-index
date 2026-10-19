@@ -48,6 +48,7 @@ def normalize_name(name: str) -> str:
 # Extract unique, normalized package names from flat S3 keys (package/file).
 def get_all_packages(objects) -> set:
     packages = set()
+
     for obj in objects:
         key = obj.get("Key", "")
         if "/" in key:
@@ -56,6 +57,7 @@ def get_all_packages(objects) -> set:
             if len(parts) >= 2 and parts[-1]:
                 raw_package_name = parts[0]
                 packages.add(normalize_name(raw_package_name))
+
     return packages
 
 
@@ -107,8 +109,10 @@ def generate_package_html(package_name: str, objects) -> str:
 def list_all_objects() -> list:
     objects = []
     paginator = s3_client.get_paginator("list_objects_v2")
+
     for page in paginator.paginate(Bucket=BUCKET_NAME):
         objects.extend(page.get("Contents", []))
+
     return objects
 
 
@@ -150,6 +154,7 @@ def get_credentials() -> dict:
 
     _credentials_cache["value"] = credentials
     _credentials_cache["expires_at"] = now + AUTH_CACHE_TTL
+
     return credentials
 
 
@@ -171,6 +176,7 @@ def parse_basic_auth(request) -> tuple:
     username, sep, password = decoded.partition(":")
     if not sep:
         return None, None
+
     return username, password
 
 
@@ -182,6 +188,7 @@ def is_authorized(request) -> bool:
     expected = get_credentials().get(username)
     if not isinstance(expected, str):
         return False
+
     return hmac.compare_digest(password.encode("utf-8"), expected.encode("utf-8"))
 
 
@@ -251,6 +258,7 @@ def route_to_upstream(request, package_name: str):
     # Cache key ignores Accept, so always ask for the PEP 503 HTML flavour
     headers["accept"] = [{"key": "Accept", "value": "text/html"}]
     headers.pop("authorization", None)
+
     return request
 
 
@@ -301,4 +309,5 @@ def handler(event, context):
 
     if event_type == "viewer-request":
         return handle_viewer_request(request)
+
     return handle_origin_request(request)

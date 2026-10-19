@@ -10,9 +10,6 @@ provider "aws" {
 module "complete" {
   source = "../.."
 
-  # General configs
-  aws_region = "eu-west-1"
-
   # CloudFront configs
   cloudfront_ttl_min     = 0
   cloudfront_ttl_default = 1
@@ -40,7 +37,6 @@ module "complete" {
   s3_attach_deny_ssec_encrypted_object_uploads = false
 
   s3_acceleration_status      = "Suspended"
-  s3_attach_policy            = false
   s3_block_public_acls        = true
   s3_block_public_policy      = true
   s3_control_object_ownership = true
