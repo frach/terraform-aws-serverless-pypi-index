@@ -7,3 +7,8 @@ output "s3_bucket_id" {
   description = "Name of the S3 bucket used as the package store"
   value       = module.complete.s3_bucket_id
 }
+
+output "auth_secret_name" {
+  description = "Secrets Manager secret holding the Basic Auth credentials"
+  value       = module.complete.auth_secret_name
+}

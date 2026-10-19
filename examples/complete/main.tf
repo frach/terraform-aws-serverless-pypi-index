@@ -18,6 +18,18 @@ module "complete" {
   cloudfront_ttl_default = 1
   cloudfront_ttl_max     = 1000
 
+  # Authentication configs
+  auth_enabled = true
+  auth_credentials = {
+    ci     = var.ci_password
+    reader = var.reader_password
+  }
+  auth_secret_recovery_window_in_days = 0
+
+  # Upstream proxy configs
+  upstream_enabled   = true
+  upstream_index_url = "https://pypi.org/simple"
+
   # S3 configs
   s3_create_bucket = true
   s3_bucket_name   = null # Let Terraform generate a random one
