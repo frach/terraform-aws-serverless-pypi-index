@@ -1,7 +1,5 @@
 data "aws_caller_identity" "current" {}
 
-data "aws_partition" "current" {}
-
 data "aws_cloudfront_cache_policy" "caching_optimized" {
   name = "Managed-CachingOptimized"
 }
@@ -10,9 +8,33 @@ data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
   name = "Managed-AllViewerExceptHostHeader"
 }
 
+# Existing bucket used when `s3_create_bucket` is false. It must live in `aws_region`
+data "aws_s3_bucket" "existing" {
+  count = var.s3_create_bucket ? 0 : 1
+
+  bucket = var.s3_bucket_name
+
+  lifecycle {
+    precondition {
+      condition     = var.s3_bucket_name != null
+      error_message = "s3_bucket_name must be set to an existing bucket name when s3_create_bucket is false."
+    }
+  }
+}
+
 locals {
   resources_name_prefix = "serverless-pypi-index"
-  s3_bucket_arn         = var.s3_create_bucket ? module.s3_bucket.s3_bucket_arn : "arn:${data.aws_partition.current.partition}:s3:::${var.s3_bucket_name}"
+
+  # Resolve the bucket regardless of whether this module created it
+  s3_bucket_id                   = var.s3_create_bucket ? module.s3_bucket.s3_bucket_id : data.aws_s3_bucket.existing[0].id
+  s3_bucket_arn                  = var.s3_create_bucket ? module.s3_bucket.s3_bucket_arn : data.aws_s3_bucket.existing[0].arn
+  s3_bucket_regional_domain_name = var.s3_create_bucket ? module.s3_bucket.s3_bucket_bucket_regional_domain_name : data.aws_s3_bucket.existing[0].bucket_regional_domain_name
+
+  # Viewer-request runs on every request (auth), origin-request on cache misses (index generation & upstream routing)
+  lambda_function_association = {
+    for event_type in compact(["origin-request", var.auth_enabled ? "viewer-request" : ""]) :
+    event_type => { lambda_arn = module.lambda_function.lambda_function_qualified_arn }
+  }
 }
 
 
@@ -22,8 +44,6 @@ locals {
 # Default provider for persistent resources (S3, Secrets Manager)
 provider "aws" {
   region = var.aws_region
-
-
 }
 
 # Dedicated provider for Lambda@Edge (CloudFront strictly requires us-east-1)
@@ -114,8 +134,8 @@ data "aws_iam_policy_document" "s3_bucket" {
 }
 
 resource "aws_s3_bucket_policy" "s3_bucket_policy" {
-  # Attach newly created bucket policy to the S3 bucket, if `s3_attach_policy` is true. Otherwise, attach to the existing bucket specified by `s3_bucket_name`
-  bucket = var.s3_create_bucket ? module.s3_bucket.s3_bucket_id : var.s3_bucket_name
+  # Attached to either the created bucket or the existing one. NOTE: this replaces any policy already on an existing bucket
+  bucket = local.s3_bucket_id
   policy = data.aws_iam_policy_document.s3_bucket.json
 }
 
@@ -156,7 +176,7 @@ module "cloudfront" {
   # Origins
   origin = {
     s3_origin = {
-      domain_name           = module.s3_bucket.s3_bucket_bucket_regional_domain_name
+      domain_name           = local.s3_bucket_regional_domain_name
       origin_access_control = "s3_oac" # Key from `origin_access_control` block
     }
   }
@@ -180,13 +200,7 @@ module "cloudfront" {
     max_ttl     = var.cloudfront_ttl_max
 
     # Lambda@Edge functions
-    lambda_function_association = {
-      # Valid keys: viewer-request, origin-request, viewer-response, origin-response
-      viewer-request = {
-        lambda_arn   = module.lambda_function.lambda_function_qualified_arn
-        include_body = true
-      }
-    }
+    lambda_function_association = local.lambda_function_association
   }
 
   ordered_cache_behavior = []
@@ -205,14 +219,41 @@ module "cloudfront" {
 }
 
 
+#---------------------------#
+#      AUTHENTICATION       #
+#---------------------------#
+# Basic Auth credentials as a JSON object of {"username": "password"} pairs
+resource "aws_secretsmanager_secret" "auth" {
+  count = var.auth_enabled ? 1 : 0
+
+  name_prefix             = "${local.resources_name_prefix}-credentials-"
+  description             = "Basic Auth credentials for the serverless PyPI index"
+  recovery_window_in_days = var.auth_secret_recovery_window_in_days
+}
+
+# Only managed by Terraform when credentials are passed in. Otherwise populate the secret out-of-band
+resource "aws_secretsmanager_secret_version" "auth" {
+  count = var.auth_enabled && nonsensitive(length(var.auth_credentials)) > 0 ? 1 : 0
+
+  secret_id     = aws_secretsmanager_secret.auth[0].id
+  secret_string = jsonencode(var.auth_credentials)
+}
+
+
 #--------------------------#
 #          LAMBDA          #
 #--------------------------#
 resource "local_file" "lambda_config" {
   filename = "${path.module}/src/config.json"
   content = jsonencode({
-    aws_region  = var.aws_region
-    bucket_name = module.s3_bucket.s3_bucket_id
+    aws_region         = var.aws_region
+    bucket_name        = local.s3_bucket_id
+    auth_enabled       = var.auth_enabled
+    auth_secret_id     = var.auth_enabled ? aws_secretsmanager_secret.auth[0].arn : null
+    auth_realm         = var.auth_realm
+    auth_cache_ttl     = var.auth_cache_ttl
+    upstream_enabled   = var.upstream_enabled
+    upstream_index_url = var.upstream_index_url
   })
 }
 
@@ -226,10 +267,11 @@ module "lambda_function" {
     aws = aws.us_east_1
   }
 
-  function_name = "${local.resources_name_prefix}-edge-router-v4" # TODO change it back
+  function_name = "${local.resources_name_prefix}-edge-router"
   description   = "Dynamic PEP 503 compliant HTML generator and optional basic authentication proxy"
   handler       = "index.handler"
   runtime       = "python3.12"
+  timeout       = 5 # Maximum allowed for viewer-request triggers
 
   # Absolute architectural requirements for running lambda at the edge
   publish        = true
@@ -251,7 +293,7 @@ module "lambda_function" {
 
       # Force a zip rebuilding sequence if config.json contents shift
       triggers = {
-        index_sha  = sha256("${path.module}/src/index.py")
+        index_sha  = filesha256("${path.module}/src/index.py")
         config_sha = sha256(local_file.lambda_config.content)
       }
     }
@@ -261,19 +303,29 @@ module "lambda_function" {
   attach_policy_json = true
   policy_json = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Sid      = "AllowS3BucketListing"
-        Effect   = "Allow"
-        Action   = ["s3:ListBucket"]
-        Resource = local.s3_bucket_arn
-      },
-      {
-        Sid      = "AllowS3ArtifactRetrieval"
-        Effect   = "Allow"
-        Action   = ["s3:GetObject"]
-        Resource = "${local.s3_bucket_arn}/*"
-      }
-    ]
+    Statement = concat(
+      [
+        {
+          Sid      = "AllowS3BucketListing"
+          Effect   = "Allow"
+          Action   = ["s3:ListBucket"]
+          Resource = local.s3_bucket_arn
+        },
+        {
+          Sid      = "AllowS3ArtifactRetrieval"
+          Effect   = "Allow"
+          Action   = ["s3:GetObject"]
+          Resource = "${local.s3_bucket_arn}/*"
+        }
+      ],
+      var.auth_enabled ? [
+        {
+          Sid      = "AllowAuthCredentialsRetrieval"
+          Effect   = "Allow"
+          Action   = ["secretsmanager:GetSecretValue"]
+          Resource = aws_secretsmanager_secret.auth[0].arn
+        }
+      ] : []
+    )
   })
 }
