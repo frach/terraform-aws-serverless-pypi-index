@@ -48,6 +48,63 @@ variable "cloudfront_use_acm_certificate" {
 }
 
 
+# Authentication variables
+variable "auth_enabled" {
+  description = "Whether to protect the whole index (including package downloads) with HTTP Basic Authentication backed by AWS Secrets Manager"
+  type        = bool
+  default     = false
+}
+
+variable "auth_credentials" {
+  description = "Map of username => password stored in the Secrets Manager secret. Values end up in Terraform state; leave empty to populate the secret out-of-band as a JSON object of username/password pairs"
+  type        = map(string)
+  default     = {}
+  sensitive   = true
+}
+
+variable "auth_realm" {
+  description = "Realm advertised in the WWW-Authenticate challenge"
+  type        = string
+  default     = "Private PyPI"
+
+  validation {
+    condition     = !can(regex("[\"\\\\]", var.auth_realm))
+    error_message = "auth_realm must not contain double quotes or backslashes."
+  }
+}
+
+variable "auth_cache_ttl" {
+  description = "Number of seconds the Lambda@Edge function caches credentials in memory before re-reading the secret. Credential changes take up to this long to propagate"
+  type        = number
+  default     = 300
+}
+
+variable "auth_secret_recovery_window_in_days" {
+  description = "Number of days Secrets Manager waits before deleting the credentials secret. 0 forces immediate deletion"
+  type        = number
+  default     = 7
+}
+
+
+# Upstream proxy variables
+variable "upstream_enabled" {
+  description = "Whether to proxy /simple/<package>/ requests to the upstream index when the package is not hosted in the S3 bucket. Locally hosted packages always take precedence"
+  type        = bool
+  default     = false
+}
+
+variable "upstream_index_url" {
+  description = "HTTPS URL of the upstream PEP 503 simple index (e.g. https://pypi.org/simple)"
+  type        = string
+  default     = "https://pypi.org/simple"
+
+  validation {
+    condition     = can(regex("^https://[^/]+", var.upstream_index_url))
+    error_message = "upstream_index_url must be an https:// URL."
+  }
+}
+
+
 # S3 variables
 variable "s3_create_bucket" {
   description = "Whether to create S3 bucket or not"
@@ -56,7 +113,7 @@ variable "s3_create_bucket" {
 }
 
 variable "s3_bucket_name" {
-  description = "The name of the bucket. If s3_create_bucket is false, this variable must be provided with the name of an existing bucket to be used as the origin for CloudFront distribution"
+  description = "The name of the bucket. If s3_create_bucket is false, this must be the name of an existing bucket in aws_region to be used as the origin for CloudFront distribution. Its bucket policy is replaced by this module"
   type        = string
   default     = null
 }
