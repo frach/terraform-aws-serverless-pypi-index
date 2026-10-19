@@ -1,9 +1,3 @@
-variable "aws_region" {
-  type        = string
-  default     = "eu-central-1"
-  description = "The primary AWS region where the S3 storage bucket and Secrets Manager will be deployed."
-}
-
 # CloudFront variables
 variable "cloudfront_enabled" {
   description = "Whether to create CloudFront distribution or not"
@@ -24,21 +18,21 @@ variable "cloudfront_price_class" {
 }
 
 variable "cloudfront_ttl_min" {
-  description = "Minimum TTL for CloudFront cache behavior"
+  description = "Minimum TTL (seconds) for /simple/ index pages in CloudFront. Package files use the managed CachingOptimized policy"
   type        = number
-  default     = 1 # Change it later to 3600 (1 hour) or more, but for testing purposes we want it to be low
+  default     = 0
 }
 
 variable "cloudfront_ttl_default" {
-  description = "Default TTL for CloudFront cache behavior"
+  description = "Default TTL (seconds) for /simple/ index pages in CloudFront. Newly uploaded files show up in the index after at most this long"
   type        = number
-  default     = 1 # Change later to 3600 (1 hour) or more, but for testing purposes we want it to be low
+  default     = 300
 }
 
 variable "cloudfront_ttl_max" {
-  description = "Maximum TTL for CloudFront cache behavior"
+  description = "Maximum TTL (seconds) for /simple/ index pages in CloudFront"
   type        = number
-  default     = 1 # Change it later to 86400 # 24 hours
+  default     = 3600
 }
 
 variable "cloudfront_use_acm_certificate" {
@@ -113,15 +107,15 @@ variable "s3_create_bucket" {
 }
 
 variable "s3_bucket_name" {
-  description = "The name of the bucket. If s3_create_bucket is false, this must be the name of an existing bucket in aws_region to be used as the origin for CloudFront distribution. Its bucket policy is replaced by this module"
+  description = "The name of the bucket. If s3_create_bucket is false, this must be the name of an existing bucket in the provider's region to be used as the origin for CloudFront distribution. Its bucket policy is replaced by this module"
   type        = string
   default     = null
 }
 
 variable "s3_force_destroy" {
-  description = "Flag to force destroy the bucket"
+  description = "Flag to force destroy the bucket. When true, destroying the module deletes every package stored in it"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "s3_acceleration_status" {
@@ -142,10 +136,10 @@ variable "s3_acl" {
   default     = "private"
 }
 
-variable "s3_attach_policy" {
-  description = "Flag to attach policy"
-  type        = bool
-  default     = false
+variable "s3_admin_principal_arns" {
+  description = "IAM principal ARNs granted full access (s3:*) to the bucket via the bucket policy. Usually unnecessary for same-account identities, whose IAM policies already grant access"
+  type        = list(string)
+  default     = []
 }
 
 variable "s3_attach_deny_insecure_transport_policy" {

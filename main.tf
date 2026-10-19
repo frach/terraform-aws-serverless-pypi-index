@@ -1,5 +1,10 @@
 data "aws_caller_identity" "current" {}
 
+data "aws_partition" "current" {}
+
+# Region of the caller's default provider: S3 bucket and Secrets Manager live here
+data "aws_region" "current" {}
+
 data "aws_cloudfront_cache_policy" "caching_optimized" {
   name = "Managed-CachingOptimized"
 }
@@ -8,7 +13,7 @@ data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
   name = "Managed-AllViewerExceptHostHeader"
 }
 
-# Existing bucket used when `s3_create_bucket` is false. It must live in `aws_region`
+# Existing bucket used when `s3_create_bucket` is false. It must live in the provider's region
 data "aws_s3_bucket" "existing" {
   count = var.s3_create_bucket ? 0 : 1
 
@@ -24,32 +29,22 @@ data "aws_s3_bucket" "existing" {
 
 locals {
   resources_name_prefix = "serverless-pypi-index"
+  lambda_function_name  = "${local.resources_name_prefix}-edge-router"
 
   # Resolve the bucket regardless of whether this module created it
   s3_bucket_id                   = var.s3_create_bucket ? module.s3_bucket.s3_bucket_id : data.aws_s3_bucket.existing[0].id
   s3_bucket_arn                  = var.s3_create_bucket ? module.s3_bucket.s3_bucket_arn : data.aws_s3_bucket.existing[0].arn
   s3_bucket_regional_domain_name = var.s3_create_bucket ? module.s3_bucket.s3_bucket_bucket_regional_domain_name : data.aws_s3_bucket.existing[0].bucket_regional_domain_name
 
-  # Viewer-request runs on every request (auth), origin-request on cache misses (index generation & upstream routing)
-  lambda_function_association = {
-    for event_type in compact(["origin-request", var.auth_enabled ? "viewer-request" : ""]) :
-    event_type => { lambda_arn = module.lambda_function.lambda_function_qualified_arn }
+  # Viewer-request runs on every request (auth), origin-request on index cache misses (index generation & upstream routing)
+  lambda_files_association = {
+    for event_type in(var.auth_enabled ? ["viewer-request"] : []) :
+    event_type => { lambda_arn = aws_lambda_function.edge.qualified_arn }
   }
-}
-
-
-#---------------------------#
-#         PROVIDERS         #
-#---------------------------#
-# Default provider for persistent resources (S3, Secrets Manager)
-provider "aws" {
-  region = var.aws_region
-}
-
-# Dedicated provider for Lambda@Edge (CloudFront strictly requires us-east-1)
-provider "aws" {
-  alias  = "us_east_1"
-  region = "us-east-1"
+  lambda_index_association = {
+    for event_type in compact(["origin-request", var.auth_enabled ? "viewer-request" : ""]) :
+    event_type => { lambda_arn = aws_lambda_function.edge.qualified_arn }
+  }
 }
 
 
@@ -68,9 +63,10 @@ module "s3_bucket" {
   acceleration_status = var.s3_acceleration_status
   request_payer       = var.s3_request_payer
 
-  # Access and permissions control
+  # Access and permissions control. The module merges our policy with the optional deny policies, so there is a single policy writer
   acl                                       = var.s3_acl
-  attach_policy                             = var.s3_attach_policy
+  attach_policy                             = true
+  policy                                    = data.aws_iam_policy_document.s3_bucket.json
   attach_deny_insecure_transport_policy     = var.s3_attach_deny_insecure_transport_policy
   attach_require_latest_tls_policy          = var.s3_attach_require_latest_tls_policy
   attach_deny_incorrect_encryption_headers  = var.s3_attach_deny_incorrect_encryption_headers
@@ -116,25 +112,32 @@ data "aws_iam_policy_document" "s3_bucket" {
     }
   }
 
-  # Allow all S3 actions for current IAM user
-  statement {
-    sid     = "AllowAdminUserFullAccess"
-    effect  = "Allow"
-    actions = ["s3:*"]
-    resources = [
-      "${local.s3_bucket_arn}/*",
-      local.s3_bucket_arn
-    ]
+  # Optional explicit admin principals (same-account IAM identities usually don't need this)
+  dynamic "statement" {
+    for_each = length(var.s3_admin_principal_arns) > 0 ? [1] : []
 
-    principals {
-      type        = "AWS"
-      identifiers = [data.aws_caller_identity.current.arn]
+    content {
+      sid     = "AllowAdminPrincipalsFullAccess"
+      effect  = "Allow"
+      actions = ["s3:*"]
+      resources = [
+        "${local.s3_bucket_arn}/*",
+        local.s3_bucket_arn
+      ]
+
+      principals {
+        type        = "AWS"
+        identifiers = var.s3_admin_principal_arns
+      }
     }
   }
 }
 
+# Only for an existing bucket; a created bucket gets the policy through the S3 module.
+# NOTE: this replaces any policy already attached to the existing bucket
 resource "aws_s3_bucket_policy" "s3_bucket_policy" {
-  # Attached to either the created bucket or the existing one. NOTE: this replaces any policy already on an existing bucket
+  count = var.s3_create_bucket ? 0 : 1
+
   bucket = local.s3_bucket_id
   policy = data.aws_iam_policy_document.s3_bucket.json
 }
@@ -143,6 +146,30 @@ resource "aws_s3_bucket_policy" "s3_bucket_policy" {
 #--------------------------#
 #        CLOUDFRONT        #
 #--------------------------#
+# Index pages change on upload, so they get their own (short) TTLs. Package files are immutable and use CachingOptimized
+resource "aws_cloudfront_cache_policy" "index" {
+  name        = "${local.resources_name_prefix}-index"
+  comment     = "Cache policy for PEP 503 /simple/ index pages"
+  min_ttl     = var.cloudfront_ttl_min
+  default_ttl = var.cloudfront_ttl_default
+  max_ttl     = var.cloudfront_ttl_max
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    enable_accept_encoding_brotli = true
+    enable_accept_encoding_gzip   = true
+
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "none"
+    }
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+  }
+}
+
 module "cloudfront" {
   source  = "terraform-aws-modules/cloudfront/aws"
   version = "6.4.0"
@@ -182,7 +209,7 @@ module "cloudfront" {
   }
   vpc_origin = {}
 
-  # Cache behaviors
+  # Default behavior: package files served straight from S3
   default_cache_behavior = {
     target_origin_id       = "s3_origin"
     viewer_protocol_policy = "redirect-to-https"
@@ -190,20 +217,29 @@ module "cloudfront" {
     allowed_methods = ["GET", "HEAD", "OPTIONS"]
     cached_methods  = ["GET", "HEAD"]
 
-    # Cache key optimizations
     cache_policy_id          = data.aws_cloudfront_cache_policy.caching_optimized.id
     origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
 
-    # Cache TTL
-    min_ttl     = var.cloudfront_ttl_min
-    default_ttl = var.cloudfront_ttl_default
-    max_ttl     = var.cloudfront_ttl_max
-
     # Lambda@Edge functions
-    lambda_function_association = local.lambda_function_association
+    lambda_function_association = local.lambda_files_association
   }
 
-  ordered_cache_behavior = []
+  # Index pages (/simple and /simple/*): generated by Lambda@Edge, or proxied from upstream
+  ordered_cache_behavior = [
+    for path_pattern in ["/simple", "/simple/*"] : {
+      path_pattern           = path_pattern
+      target_origin_id       = "s3_origin"
+      viewer_protocol_policy = "redirect-to-https"
+
+      allowed_methods = ["GET", "HEAD", "OPTIONS"]
+      cached_methods  = ["GET", "HEAD"]
+
+      cache_policy_id          = aws_cloudfront_cache_policy.index.id
+      origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+
+      lambda_function_association = local.lambda_index_association
+    }
+  ]
 
   restrictions = {
     geo_restriction = {
@@ -243,65 +279,73 @@ resource "aws_secretsmanager_secret_version" "auth" {
 #--------------------------#
 #          LAMBDA          #
 #--------------------------#
-resource "local_file" "lambda_config" {
-  filename = "${path.module}/src/config.json"
-  content = jsonencode({
-    aws_region         = var.aws_region
-    bucket_name        = local.s3_bucket_id
-    auth_enabled       = var.auth_enabled
-    auth_secret_id     = var.auth_enabled ? aws_secretsmanager_secret.auth[0].arn : null
-    auth_realm         = var.auth_realm
-    auth_cache_ttl     = var.auth_cache_ttl
-    upstream_enabled   = var.upstream_enabled
-    upstream_index_url = var.upstream_index_url
+# Lambda@Edge has no environment variables, so the config ships as a sidecar file inside the package.
+# Built in memory from sources, nothing is written into the module directory
+data "archive_file" "lambda" {
+  type        = "zip"
+  output_path = "${path.root}/builds/${local.lambda_function_name}.zip"
+
+  source {
+    filename = "index.py"
+    content  = file("${path.module}/src/index.py")
+  }
+
+  source {
+    filename = "config.json"
+    content = jsonencode({
+      aws_region         = data.aws_region.current.region
+      bucket_name        = local.s3_bucket_id
+      auth_enabled       = var.auth_enabled
+      auth_secret_id     = var.auth_enabled ? aws_secretsmanager_secret.auth[0].arn : null
+      auth_realm         = var.auth_realm
+      auth_cache_ttl     = var.auth_cache_ttl
+      upstream_enabled   = var.upstream_enabled
+      upstream_index_url = var.upstream_index_url
+    })
+  }
+}
+
+data "aws_iam_policy_document" "lambda_edge_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com", "edgelambda.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "lambda_edge" {
+  name               = local.lambda_function_name
+  assume_role_policy = data.aws_iam_policy_document.lambda_edge_assume_role.json
+}
+
+# Lambda@Edge writes logs to /aws/lambda/us-east-1.<name> in whichever region served the request
+resource "aws_iam_role_policy" "lambda_edge_logs" {
+  name = "${local.lambda_function_name}-logs"
+  role = aws_iam_role.lambda_edge.name
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = [
+          "arn:${data.aws_partition.current.partition}:logs:*:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/us-east-1.${local.lambda_function_name}:*",
+          "arn:${data.aws_partition.current.partition}:logs:*:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/us-east-1.${local.lambda_function_name}:*:*"
+        ]
+      }
+    ]
   })
 }
 
-module "lambda_function" {
-  source  = "terraform-aws-modules/lambda/aws"
-  version = "~> 8.0"
-
-  # Enforce deployment in us-east-1 (CloudFront global constraint for Edge computing)
-  # Ensure you define this alias in your provider configuration block
-  providers = {
-    aws = aws.us_east_1
-  }
-
-  function_name = "${local.resources_name_prefix}-edge-router"
-  description   = "Dynamic PEP 503 compliant HTML generator and optional basic authentication proxy"
-  handler       = "index.handler"
-  runtime       = "python3.12"
-  timeout       = 5 # Maximum allowed for viewer-request triggers
-
-  # Absolute architectural requirements for running lambda at the edge
-  publish        = true
-  lambda_at_edge = true
-  create_package = true
-
-  # Point directly to the directory. This guarantees index.py and config.json
-  # sit together at the root of the compiled ZIP.
-  source_path = [
-    {
-      path = "${path.module}/src"
-
-      # Use patterns with native regex exclusion rules:
-      patterns = [
-        "!test_index\\.py",
-        "!__pycache__/.*",
-        "!.pytest_cache/.*"
-      ]
-
-      # Force a zip rebuilding sequence if config.json contents shift
-      triggers = {
-        index_sha  = filesha256("${path.module}/src/index.py")
-        config_sha = sha256(local_file.lambda_config.content)
-      }
-    }
-  ]
-
-  # Inline IAM Policy granting explicit least-privilege cross-service permissions
-  attach_policy_json = true
-  policy_json = jsonencode({
+# Inline IAM Policy granting explicit least-privilege cross-service permissions
+resource "aws_iam_role_policy" "lambda_edge" {
+  name = local.lambda_function_name
+  role = aws_iam_role.lambda_edge.name
+  policy = jsonencode({
     Version = "2012-10-17"
     Statement = concat(
       [
@@ -328,4 +372,30 @@ module "lambda_function" {
       ] : []
     )
   })
+}
+
+resource "aws_cloudwatch_log_group" "lambda_edge" {
+  region = "us-east-1"
+
+  name = "/aws/lambda/us-east-1.${local.lambda_function_name}"
+}
+
+resource "aws_lambda_function" "edge" {
+  # Lambda@Edge must be deployed in us-east-1 (CloudFront global constraint for Edge computing)
+  region = "us-east-1"
+
+  function_name = local.lambda_function_name
+  description   = "Dynamic PEP 503 compliant HTML generator and optional basic authentication proxy"
+  role          = aws_iam_role.lambda_edge.arn
+  handler       = "index.handler"
+  runtime       = "python3.12"
+  timeout       = 5 # Maximum allowed for viewer-request triggers
+
+  # CloudFront associations require a published, numbered version
+  publish = true
+
+  filename         = data.archive_file.lambda.output_path
+  source_code_hash = data.archive_file.lambda.output_base64sha256
+
+  depends_on = [aws_iam_role_policy.lambda_edge_logs, aws_cloudwatch_log_group.lambda_edge]
 }
