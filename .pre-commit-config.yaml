@@ -15,6 +15,9 @@ repos:
           - --hook-config=--tool-version=0.64.0
           - --args=--config=__GIT_WORKING_DIR__/.tflint.hcl
       - id: terraform_validate
+        args:
+          # Re-init from scratch when providers/modules changed since the last `terraform init`
+          - --hook-config=--retry-once-with-cleanup=true
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
