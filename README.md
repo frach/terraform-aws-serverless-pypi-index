@@ -206,7 +206,7 @@ Versions follow [SemVer](https://semver.org) with `v`-prefixed tags. Before `1.0
 2. Bump `?ref=` in the README snippets, open a PR and merge it once CI is green.
 3. Tag the merge commit and push the tag:
    ```bash
-   git switch master && git pull
+   git switch main && git pull
    git tag -a vX.Y.Z -m "vX.Y.Z"
    git push origin vX.Y.Z
    ```
