@@ -1,0 +1,48 @@
+name: Bug report
+description: Something doesn't work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problem? Please don't file it here, see [SECURITY.md](https://github.com/frach/terraform-aws-serverless-pypi-index/blob/main/SECURITY.md).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what happened instead. Include error messages.
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Module configuration
+      description: Your `module "..." {}` block, without secrets.
+      render: hcl
+    validations:
+      required: true
+  - type: input
+    id: module-version
+    attributes:
+      label: Module version
+      placeholder: v0.2.0
+    validations:
+      required: true
+  - type: input
+    id: tool-versions
+    attributes:
+      label: Terraform / OpenTofu and AWS provider versions
+      placeholder: Terraform 1.13.4, hashicorp/aws 6.28.0
+    validations:
+      required: true
+  - type: dropdown
+    id: client
+    attributes:
+      label: Python client (if relevant)
+      options: [pip, uv, Poetry, other, not relevant]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Terraform output, `curl -v` output or Lambda@Edge logs from CloudWatch (`/aws/lambda/us-east-1.<name>-edge-router` in the region that served the request).
+      render: text
