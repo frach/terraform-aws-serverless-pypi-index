@@ -257,6 +257,15 @@ make test
 make tf-test
 make check
 ```
+
+Before a release, run the end-to-end test against a sandbox AWS account. It deploys the module from your checkout, publishes a
+small package and checks auth, the PEP 503 pages, package downloads, security headers, `pip install` and the pypi.org fallback,
+then tears everything down (a few cents, 15-20 minutes):
+```bash
+AWS_PROFILE=sandbox AWS_REGION=eu-central-1 make e2e
+```
+Lambda@Edge functions can only be deleted a few hours after their CloudFront distribution, so the teardown may stop at the
+function. Finish it later with `make e2e-destroy`.
 * **Terraform**: `>= 1.5.7` (or OpenTofu)
 * **AWS Provider**: `>= 6.28.0`
 * **Python**: `Python 3.12` / `Python 3.14`

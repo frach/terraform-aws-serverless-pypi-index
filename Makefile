@@ -110,6 +110,14 @@ tf-test: ## Run Terraform unit tests with mocked providers (Terraform >= 1.7)
 	@terraform init -backend=false -input=false
 	@terraform test
 
+.PHONY: e2e
+e2e: ## Deploy to a real AWS account, test with curl + pip, destroy (needs AWS credentials; KEEP=1 keeps it up)
+	@scripts/e2e.sh run
+
+.PHONY: e2e-destroy
+e2e-destroy: ## Remove the e2e deployment (re-run hours later if Lambda@Edge replicas block it)
+	@scripts/e2e.sh down
+
 .PHONY: docs
 docs: $(TFDOCS) ## Generate Terraform docs into README.md
 	@echo "==> Generating terraform-docs..."
