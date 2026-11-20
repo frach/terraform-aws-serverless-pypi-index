@@ -4,7 +4,8 @@ import re
 import time
 import base64
 import hmac
-from urllib.parse import urlparse
+from html import escape
+from urllib.parse import quote, urlparse
 
 import boto3
 
@@ -64,7 +65,8 @@ def get_all_packages(objects) -> set:
 # Generate the root PEP 503 index page (/simple/).
 def generate_root_html(packages: set) -> str:
     links = "".join(
-        f'    <a href="{pkg}/">{pkg}</a><br/>\n' for pkg in sorted(packages)
+        f'    <a href="{quote(pkg)}/">{escape(pkg)}</a><br/>\n'
+        for pkg in sorted(packages)
     )
 
     return f"""<!DOCTYPE html>
@@ -91,15 +93,18 @@ def generate_package_html(package_name: str, objects) -> str:
                 filename = parts[-1]
 
                 if normalize_name(raw_package_name) == normalized_target:
-                    links += f'    <a href="/{key}">{filename}</a><br/>\n'
+                    href = escape(quote(f"/{key}"))
+                    links += f'    <a href="{href}">{escape(filename)}</a><br/>\n'
+
+    title = escape(package_name)
 
     return f"""<!DOCTYPE html>
 <html>
   <head>
-    <title>Links for {package_name}</title>
+    <title>Links for {title}</title>
   </head>
   <body>
-    <h1>Links for {package_name}</h1>
+    <h1>Links for {title}</h1>
 {links}
   </body>
 </html>"""
@@ -282,7 +287,9 @@ def handle_origin_request(request):
     try:
         objects = list_all_objects()
     except Exception as e:
-        return html_response("500", "Internal Server Error", f"S3 Error: {str(e)}")
+        # Details go to CloudWatch only, so clients learn nothing about the infrastructure
+        print(f"S3 listing failed: {e!r}")
+        return html_response("500", "Internal Server Error", "Internal Server Error")
 
     # Case 1: Root simple index page (/simple or /simple/)
     if len(parts) == 1:
@@ -298,7 +305,9 @@ def handle_origin_request(request):
     if UPSTREAM_ENABLED:
         return route_to_upstream(request, package_name)
 
-    return html_response("404", "Not Found", f"Package {package_name} not found")
+    return html_response(
+        "404", "Not Found", f"Package {escape(package_name)} not found"
+    )
 
 
 # MAIN HANDLER

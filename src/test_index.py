@@ -257,3 +257,43 @@ def test_viewer_request_fails_closed_when_secret_unavailable(
     response = handler(event, None)
 
     assert response["status"] == "503"
+
+
+@patch("index.s3_client")
+def test_package_page_escapes_object_keys(mock_s3, setup_test_environment):
+    """Verify S3 keys can't inject markup into index pages and links are URL-encoded."""
+    mock_listing(
+        mock_s3,
+        [
+            {"Key": 'evil/evil-1.0"><img src=x onerror=alert(1)>.whl'},
+            {"Key": "evil/evil-1.0+local-py3-none-any.whl"},
+        ],
+    )
+
+    body = handler(create_cloudfront_event("/simple/evil/"), None)["body"]
+
+    assert "<img" not in body
+    assert "&lt;img src=x onerror=alert(1)&gt;" in body
+    assert 'href="/evil/evil-1.0%2Blocal-py3-none-any.whl"' in body
+
+
+@patch("index.s3_client")
+def test_requested_package_name_is_escaped(mock_s3, setup_test_environment):
+    """Verify a crafted /simple/<name>/ path is not reflected as markup."""
+    mock_listing(mock_s3)
+
+    response = handler(create_cloudfront_event("/simple/<img src=x>/"), None)
+
+    assert response["status"] == "404"
+    assert "<img" not in response["body"]
+
+
+@patch("index.s3_client")
+def test_s3_errors_are_not_leaked(mock_s3, setup_test_environment):
+    """Verify S3 failures return a generic 500 without internal details."""
+    mock_s3.get_paginator.side_effect = Exception("AccessDenied for arn:aws:s3:::x")
+
+    response = handler(create_cloudfront_event("/simple/"), None)
+
+    assert response["status"] == "500"
+    assert "AccessDenied" not in response["body"]

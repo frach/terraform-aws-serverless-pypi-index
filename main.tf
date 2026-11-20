@@ -1,6 +1,13 @@
 data "aws_caller_identity" "current" {}
 
-data "aws_partition" "current" {}
+data "aws_partition" "current" {
+  lifecycle {
+    precondition {
+      condition     = length(var.cloudfront_aliases) == 0 || var.cloudfront_acm_certificate_arn != null
+      error_message = "cloudfront_acm_certificate_arn must be set when cloudfront_aliases is not empty."
+    }
+  }
+}
 
 # Region of the caller's default provider: S3 bucket and Secrets Manager live here
 data "aws_region" "current" {}
@@ -28,7 +35,7 @@ data "aws_s3_bucket" "existing" {
 }
 
 locals {
-  resources_name_prefix = "serverless-pypi-index"
+  resources_name_prefix = var.name
   lambda_function_name  = "${local.resources_name_prefix}-edge-router"
 
   # Resolve the bucket regardless of whether this module created it
@@ -86,6 +93,8 @@ module "s3_bucket" {
   object_ownership         = var.s3_object_ownership
 
   versioning = var.s3_versioning
+
+  tags = var.tags
 }
 
 
@@ -176,7 +185,7 @@ module "cloudfront" {
 
   create = true
 
-  # aliases = var.cloudfront_config.aliases
+  aliases = var.cloudfront_aliases
 
   comment             = "CloudFront distribution for PyPi index"
   enabled             = var.cloudfront_enabled
@@ -247,10 +256,31 @@ module "cloudfront" {
     }
   }
 
+  # A custom domain needs an ACM certificate (in us-east-1) covering every alias
   viewer_certificate = {
-    cloudfront_default_certificate = var.cloudfront_use_acm_certificate ? false : true
-    # acm_certificate_arn            = module.website_acm.acm_certificate_arn
-    # ssl_support_method             = "sni-only"
+    cloudfront_default_certificate = var.cloudfront_acm_certificate_arn == null
+    acm_certificate_arn            = var.cloudfront_acm_certificate_arn
+    ssl_support_method             = var.cloudfront_acm_certificate_arn != null ? "sni-only" : null
+    minimum_protocol_version       = var.cloudfront_minimum_protocol_version
+  }
+
+  tags = var.tags
+}
+
+# Optional DNS alias records (A and AAAA) for every custom domain
+resource "aws_route53_record" "alias" {
+  for_each = var.route53_zone_id != null ? {
+    for pair in setproduct(var.cloudfront_aliases, ["A", "AAAA"]) : "${pair[0]}-${pair[1]}" => { name = pair[0], type = pair[1] }
+  } : {}
+
+  zone_id = var.route53_zone_id
+  name    = each.value.name
+  type    = each.value.type
+
+  alias {
+    name                   = module.cloudfront.cloudfront_distribution_domain_name
+    zone_id                = module.cloudfront.cloudfront_distribution_hosted_zone_id
+    evaluate_target_health = false
   }
 }
 
@@ -265,6 +295,8 @@ resource "aws_secretsmanager_secret" "auth" {
   name_prefix             = "${local.resources_name_prefix}-credentials-"
   description             = "Basic Auth credentials for the serverless PyPI index"
   recovery_window_in_days = var.auth_secret_recovery_window_in_days
+
+  tags = var.tags
 }
 
 # Only managed by Terraform when credentials are passed in. Otherwise populate the secret out-of-band
@@ -320,6 +352,8 @@ data "aws_iam_policy_document" "lambda_edge_assume_role" {
 resource "aws_iam_role" "lambda_edge" {
   name               = local.lambda_function_name
   assume_role_policy = data.aws_iam_policy_document.lambda_edge_assume_role.json
+
+  tags = var.tags
 }
 
 # Lambda@Edge writes logs to /aws/lambda/us-east-1.<name> in whichever region served the request
@@ -378,6 +412,8 @@ resource "aws_cloudwatch_log_group" "lambda_edge" {
   region = "us-east-1"
 
   name = "/aws/lambda/us-east-1.${local.lambda_function_name}"
+
+  tags = var.tags
 }
 
 resource "aws_lambda_function" "edge" {
@@ -396,6 +432,8 @@ resource "aws_lambda_function" "edge" {
 
   filename         = data.archive_file.lambda.output_path
   source_code_hash = data.archive_file.lambda.output_base64sha256
+
+  tags = var.tags
 
   depends_on = [aws_iam_role_policy.lambda_edge_logs, aws_cloudwatch_log_group.lambda_edge]
 }

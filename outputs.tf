@@ -1,11 +1,21 @@
-# output "test" {
-#   value       = module.cloudfront
-#   description = "The ID of the CloudFront distribution"
-# }
-
 output "cloudfront_pypi_index_url" {
   value       = module.cloudfront.cloudfront_distribution_domain_name
   description = "The domain name of the CloudFront distribution"
+}
+
+output "index_url" {
+  value       = "https://${length(var.cloudfront_aliases) > 0 ? var.cloudfront_aliases[0] : module.cloudfront.cloudfront_distribution_domain_name}/simple/"
+  description = "The URL of the PEP 503 simple index, to pass to pip/uv as --index-url (uses the first custom domain when set)"
+}
+
+output "cloudfront_distribution_id" {
+  value       = module.cloudfront.cloudfront_distribution_id
+  description = "The ID of the CloudFront distribution (e.g. for /simple/* invalidations after uploads)"
+}
+
+output "cloudfront_distribution_arn" {
+  value       = module.cloudfront.cloudfront_distribution_arn
+  description = "The ARN of the CloudFront distribution"
 }
 
 output "s3_bucket_id" {
