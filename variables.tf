@@ -1,3 +1,21 @@
+variable "name" {
+  description = "Name (prefix) of the resources created by this module. Must be unique per AWS account, so the module can be deployed more than once"
+  type        = string
+  default     = "serverless-pypi-index"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9-]{1,52}$", var.name))
+    error_message = "name must be 1-52 characters long and contain only letters, digits and hyphens."
+  }
+}
+
+variable "tags" {
+  description = "Tags added to every resource that supports them"
+  type        = map(string)
+  default     = {}
+}
+
+
 # CloudFront variables
 variable "cloudfront_enabled" {
   description = "Whether to create CloudFront distribution or not"
@@ -35,10 +53,33 @@ variable "cloudfront_ttl_max" {
   default     = 3600
 }
 
-variable "cloudfront_use_acm_certificate" {
-  description = "Whether to use ACM certificate for CloudFront distribution or not. If false, CloudFront default certificate will be used. Only false is supported for now"
-  type        = bool
-  default     = false
+variable "cloudfront_aliases" {
+  description = "Custom domain names (CNAMEs) for the index, e.g. [\"pypi.example.com\"]. Requires cloudfront_acm_certificate_arn"
+  type        = list(string)
+  default     = []
+}
+
+variable "cloudfront_acm_certificate_arn" {
+  description = "ARN of an ACM certificate in us-east-1 covering every name in cloudfront_aliases. When null, the default *.cloudfront.net certificate is used"
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.cloudfront_acm_certificate_arn == null || can(regex("^arn:[^:]+:acm:us-east-1:", var.cloudfront_acm_certificate_arn))
+    error_message = "cloudfront_acm_certificate_arn must be an ACM certificate ARN in us-east-1."
+  }
+}
+
+variable "cloudfront_minimum_protocol_version" {
+  description = "Minimum TLS version for viewers. Only enforced with a custom certificate; the default *.cloudfront.net certificate always allows TLSv1"
+  type        = string
+  default     = "TLSv1.2_2025"
+}
+
+variable "route53_zone_id" {
+  description = "ID of a Route 53 hosted zone in which to create A/AAAA alias records for every name in cloudfront_aliases. When null, no DNS records are created"
+  type        = string
+  default     = null
 }
 
 

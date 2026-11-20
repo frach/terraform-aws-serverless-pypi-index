@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+
+* `name` input: prefix of every resource name, so the module can be deployed more than once in the same AWS account (default `serverless-pypi-index`, so existing deployments keep their names).
+* `tags` input, applied to every resource that supports tags.
+* Custom domains: `cloudfront_aliases`, `cloudfront_acm_certificate_arn`, `cloudfront_minimum_protocol_version` and optional Route 53 alias records (`route53_zone_id`).
+* New outputs: `index_url`, `cloudfront_distribution_id`, `cloudfront_distribution_arn`.
+
+### Security
+
+* Index pages HTML-escape package and file names and URL-encode links, so object keys or crafted request paths can't inject markup.
+* S3 errors are logged to CloudWatch instead of being returned to clients.
+
+### Changes
+
+* **BREAKING:** `cloudfront_use_acm_certificate` input removed (it had no effect). Use `cloudfront_acm_certificate_arn` instead.
+
 ## [0.1.0] - 2026-10-19
 
 First tagged release. **BREAKING** items refer to changes since the untagged pre-release code; see "Upgrading from pre-release versions" in the README.

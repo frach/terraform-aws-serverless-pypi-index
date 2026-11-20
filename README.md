@@ -79,6 +79,27 @@ module "pypi" {
 
 **Caching:** `/simple/` index pages use a dedicated cache policy driven by `cloudfront_ttl_min/default/max` (default 0 / 300 / 3600 s). A newly uploaded file shows up in the index after at most `cloudfront_ttl_default` seconds, or sooner with a CloudFront invalidation of `/simple/*`. Package files are immutable and use the managed `CachingOptimized` policy.
 
+**Naming and tags:** every resource name starts with `name` (default `serverless-pypi-index`). Give each instance a unique `name` to deploy the module more than once in the same AWS account (e.g. `pypi-dev` and `pypi-prod`). `tags` are added to every resource that supports them.
+
+---
+
+## 🌍 Custom Domain
+
+```hcl
+module "pypi" {
+  source = "git::https://github.com/frach/terraform-aws-serverless-pypi-index.git?ref=v0.1.0"
+
+  cloudfront_aliases             = ["pypi.example.com"]
+  cloudfront_acm_certificate_arn = aws_acm_certificate.pypi.arn # must be in us-east-1
+  route53_zone_id                = data.aws_route53_zone.example.zone_id # optional
+}
+```
+
+* The ACM certificate must live in `us-east-1` and cover every name in `cloudfront_aliases`. The module doesn't create it.
+* With a custom certificate, viewers need at least `cloudfront_minimum_protocol_version` (default `TLSv1.2_2025`).
+* When `route53_zone_id` is set, the module creates `A` and `AAAA` alias records for every alias. Otherwise point a `CNAME` at `cloudfront_pypi_index_url` yourself.
+* The `index_url` output uses the first alias, e.g. `https://pypi.example.com/simple/`.
+
 ---
 
 ## 🔐 Authentication
@@ -166,10 +187,10 @@ Also:
 ---
 
 ## 🧪 Testing & Requirements
-Run native tests with pytest:
+Run the Lambda unit tests with pytest, or every local check (pre-commit, `terraform validate`, tests):
 ```bash
-pip install pytest==8.0.0
-pytest src/
+make test
+make check
 ```
 * **Terraform**: `>= 1.5.7` (or OpenTofu)
 * **AWS Provider**: `>= 6.28.0`
@@ -199,9 +220,7 @@ Contributions and architectural enhancements are welcome for the following sched
 
 - [x] **Edge Authentication Layer**: HTTP **Basic Authentication** at the edge, credentials in **AWS Secrets Manager** with in-memory caching.
 - [x] **Upstream Proxy**: Fallback to `pypi.org` (or any PEP 503 mirror) for packages not hosted locally.
-- [ ] **Enterprise Custom Domain Mapping**:
-  - Integrate **Amazon Route 53** to configure branded vanity aliases (e.g., `https://mycompany.com`).
-  - Implement full SSL/TLS lifecycle termination via **AWS Certificate Manager (ACM)** certificates linked dynamically inside alternate domain names (CNAMEs) profiles within CloudFront.
+- [x] **Custom Domain**: CloudFront aliases with an ACM certificate and optional Route 53 alias records.
 
 ---
 
@@ -240,6 +259,7 @@ Contributions and architectural enhancements are welcome for the following sched
 | [aws_iam_role_policy.lambda_edge](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
 | [aws_iam_role_policy.lambda_edge_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
 | [aws_lambda_function.edge](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function) | resource |
+| [aws_route53_record.alias](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
 | [aws_s3_bucket_policy.s3_bucket_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_policy) | resource |
 | [aws_secretsmanager_secret.auth](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret) | resource |
 | [aws_secretsmanager_secret_version.auth](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
@@ -262,13 +282,17 @@ Contributions and architectural enhancements are welcome for the following sched
 | <a name="input_auth_enabled"></a> [auth\_enabled](#input\_auth\_enabled) | Whether to protect the whole index (including package downloads) with HTTP Basic Authentication backed by AWS Secrets Manager | `bool` | `false` | no |
 | <a name="input_auth_realm"></a> [auth\_realm](#input\_auth\_realm) | Realm advertised in the WWW-Authenticate challenge | `string` | `"Private PyPI"` | no |
 | <a name="input_auth_secret_recovery_window_in_days"></a> [auth\_secret\_recovery\_window\_in\_days](#input\_auth\_secret\_recovery\_window\_in\_days) | Number of days Secrets Manager waits before deleting the credentials secret. 0 forces immediate deletion | `number` | `7` | no |
+| <a name="input_cloudfront_acm_certificate_arn"></a> [cloudfront\_acm\_certificate\_arn](#input\_cloudfront\_acm\_certificate\_arn) | ARN of an ACM certificate in us-east-1 covering every name in cloudfront\_aliases. When null, the default *.cloudfront.net certificate is used | `string` | `null` | no |
+| <a name="input_cloudfront_aliases"></a> [cloudfront\_aliases](#input\_cloudfront\_aliases) | Custom domain names (CNAMEs) for the index, e.g. ["pypi.example.com"]. Requires cloudfront\_acm\_certificate\_arn | `list(string)` | `[]` | no |
 | <a name="input_cloudfront_enabled"></a> [cloudfront\_enabled](#input\_cloudfront\_enabled) | Whether to create CloudFront distribution or not | `bool` | `true` | no |
 | <a name="input_cloudfront_http_version"></a> [cloudfront\_http\_version](#input\_cloudfront\_http\_version) | HTTP version for CloudFront distribution | `string` | `"http2"` | no |
+| <a name="input_cloudfront_minimum_protocol_version"></a> [cloudfront\_minimum\_protocol\_version](#input\_cloudfront\_minimum\_protocol\_version) | Minimum TLS version for viewers. Only enforced with a custom certificate; the default *.cloudfront.net certificate always allows TLSv1 | `string` | `"TLSv1.2_2025"` | no |
 | <a name="input_cloudfront_price_class"></a> [cloudfront\_price\_class](#input\_cloudfront\_price\_class) | Price class for CloudFront distribution | `string` | `"PriceClass_100"` | no |
 | <a name="input_cloudfront_ttl_default"></a> [cloudfront\_ttl\_default](#input\_cloudfront\_ttl\_default) | Default TTL (seconds) for /simple/ index pages in CloudFront. Newly uploaded files show up in the index after at most this long | `number` | `300` | no |
 | <a name="input_cloudfront_ttl_max"></a> [cloudfront\_ttl\_max](#input\_cloudfront\_ttl\_max) | Maximum TTL (seconds) for /simple/ index pages in CloudFront | `number` | `3600` | no |
 | <a name="input_cloudfront_ttl_min"></a> [cloudfront\_ttl\_min](#input\_cloudfront\_ttl\_min) | Minimum TTL (seconds) for /simple/ index pages in CloudFront. Package files use the managed CachingOptimized policy | `number` | `0` | no |
-| <a name="input_cloudfront_use_acm_certificate"></a> [cloudfront\_use\_acm\_certificate](#input\_cloudfront\_use\_acm\_certificate) | Whether to use ACM certificate for CloudFront distribution or not. If false, CloudFront default certificate will be used. Only false is supported for now | `bool` | `false` | no |
+| <a name="input_name"></a> [name](#input\_name) | Name (prefix) of the resources created by this module. Must be unique per AWS account, so the module can be deployed more than once | `string` | `"serverless-pypi-index"` | no |
+| <a name="input_route53_zone_id"></a> [route53\_zone\_id](#input\_route53\_zone\_id) | ID of a Route 53 hosted zone in which to create A/AAAA alias records for every name in cloudfront\_aliases. When null, no DNS records are created | `string` | `null` | no |
 | <a name="input_s3_acceleration_status"></a> [s3\_acceleration\_status](#input\_s3\_acceleration\_status) | Acceleration status of the bucket | `string` | `"Suspended"` | no |
 | <a name="input_s3_acl"></a> [s3\_acl](#input\_s3\_acl) | Access control list for the bucket | `string` | `"private"` | no |
 | <a name="input_s3_admin_principal_arns"></a> [s3\_admin\_principal\_arns](#input\_s3\_admin\_principal\_arns) | IAM principal ARNs granted full access (s3:*) to the bucket via the bucket policy. Usually unnecessary for same-account identities, whose IAM policies already grant access | `list(string)` | `[]` | no |
@@ -289,6 +313,7 @@ Contributions and architectural enhancements are welcome for the following sched
 | <a name="input_s3_request_payer"></a> [s3\_request\_payer](#input\_s3\_request\_payer) | Request payer for the bucket | `string` | `"BucketOwner"` | no |
 | <a name="input_s3_restrict_public_buckets"></a> [s3\_restrict\_public\_buckets](#input\_s3\_restrict\_public\_buckets) | Flag to restrict public buckets | `bool` | `true` | no |
 | <a name="input_s3_versioning"></a> [s3\_versioning](#input\_s3\_versioning) | Versioning configuration for the bucket | <pre>object({<br/>    status     = bool<br/>    mfa_delete = bool<br/>  })</pre> | <pre>{<br/>  "mfa_delete": false,<br/>  "status": true<br/>}</pre> | no |
+| <a name="input_tags"></a> [tags](#input\_tags) | Tags added to every resource that supports them | `map(string)` | `{}` | no |
 | <a name="input_upstream_enabled"></a> [upstream\_enabled](#input\_upstream\_enabled) | Whether to proxy /simple/<package>/ requests to the upstream index when the package is not hosted in the S3 bucket. Locally hosted packages always take precedence | `bool` | `false` | no |
 | <a name="input_upstream_index_url"></a> [upstream\_index\_url](#input\_upstream\_index\_url) | HTTPS URL of the upstream PEP 503 simple index (e.g. https://pypi.org/simple) | `string` | `"https://pypi.org/simple"` | no |
 
@@ -298,7 +323,10 @@ Contributions and architectural enhancements are welcome for the following sched
 | ---- | ----------- |
 | <a name="output_auth_secret_arn"></a> [auth\_secret\_arn](#output\_auth\_secret\_arn) | The ARN of the Secrets Manager secret holding Basic Auth credentials (null when auth is disabled) |
 | <a name="output_auth_secret_name"></a> [auth\_secret\_name](#output\_auth\_secret\_name) | The name of the Secrets Manager secret holding Basic Auth credentials (null when auth is disabled) |
+| <a name="output_cloudfront_distribution_arn"></a> [cloudfront\_distribution\_arn](#output\_cloudfront\_distribution\_arn) | The ARN of the CloudFront distribution |
+| <a name="output_cloudfront_distribution_id"></a> [cloudfront\_distribution\_id](#output\_cloudfront\_distribution\_id) | The ID of the CloudFront distribution (e.g. for /simple/* invalidations after uploads) |
 | <a name="output_cloudfront_pypi_index_url"></a> [cloudfront\_pypi\_index\_url](#output\_cloudfront\_pypi\_index\_url) | The domain name of the CloudFront distribution |
+| <a name="output_index_url"></a> [index\_url](#output\_index\_url) | The URL of the PEP 503 simple index, to pass to pip/uv as --index-url (uses the first custom domain when set) |
 | <a name="output_s3_bucket_arn"></a> [s3\_bucket\_arn](#output\_s3\_bucket\_arn) | The ARN of the S3 bucket |
 | <a name="output_s3_bucket_domain_name"></a> [s3\_bucket\_domain\_name](#output\_s3\_bucket\_domain\_name) | The regional domain name of the S3 bucket |
 | <a name="output_s3_bucket_id"></a> [s3\_bucket\_id](#output\_s3\_bucket\_id) | The name of the S3 bucket |
