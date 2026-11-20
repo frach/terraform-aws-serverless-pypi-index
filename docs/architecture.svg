@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 540" width="1000" height="540" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-labelledby="title desc">
+  <title id="title">serverless-pypi-index architecture</title>
+  <desc id="desc">pip, uv or Poetry call CloudFront. A viewer-request Lambda@Edge checks Basic Auth against Secrets Manager. Cache misses on /simple/ go to an origin-request Lambda@Edge that builds the PEP 503 page from the S3 listing or forwards unknown packages to pypi.org. Package files come straight from S3 through Origin Access Control.</desc>
+  <style>
+    :root { --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #59636e; --edge: #f6f8fa; --edge-stroke: #d1d9e0;
+            --box: #ffffff; --cf: #8c4fff; --lambda: #ed7100; --s3: #3f8624; --sec: #dd344c; --ext: #0969da; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --line: #9198a1; --edge: #151b23; --edge-stroke: #3d444d;
+              --box: #0d1117; --cf: #a371f7; --lambda: #f0883e; --s3: #57ab5a; --sec: #f47067; --ext: #4493f8; }
+    }
+    .bg { fill: var(--bg); }
+    .t { fill: var(--fg); font-size: 15px; font-weight: 600; }
+    .s { fill: var(--muted); font-size: 12.5px; }
+    .lbl { fill: var(--muted); font-size: 12px; }
+    .box { fill: var(--box); stroke-width: 2; }
+    .edge { fill: var(--edge); stroke: var(--edge-stroke); stroke-width: 1.5; stroke-dasharray: 6 4; }
+    .a { stroke: var(--line); stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
+    .d { stroke-dasharray: 5 4; }
+    .arrowhead { fill: var(--line); }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1000" height="540" rx="12"/>
+
+  <!-- CloudFront edge -->
+  <rect class="edge" x="200" y="30" width="530" height="370" rx="14"/>
+  <text x="222" y="58" style="fill: var(--cf); font-size: 15px; font-weight: 700;">Amazon CloudFront</text>
+  <text class="s" x="222" y="76">edge locations, HTTPS only, security headers</text>
+
+  <!-- Client -->
+  <rect class="box" x="20" y="185" width="150" height="80" rx="10" style="stroke: var(--line);"/>
+  <text class="t" x="95" y="219" text-anchor="middle">pip / uv / Poetry</text>
+  <text class="s" x="95" y="239" text-anchor="middle">--index-url …/simple/</text>
+
+  <!-- Viewer-request -->
+  <rect class="box" x="225" y="175" width="165" height="100" rx="10" style="stroke: var(--lambda);"/>
+  <text class="t" x="307" y="203" text-anchor="middle">Lambda@Edge</text>
+  <text class="s" x="307" y="222" text-anchor="middle">viewer-request</text>
+  <text class="s" x="307" y="240" text-anchor="middle">Basic Auth on every</text>
+  <text class="s" x="307" y="256" text-anchor="middle">request (optional)</text>
+
+  <!-- Cache -->
+  <rect class="box" x="425" y="185" width="120" height="80" rx="10" style="stroke: var(--cf);"/>
+  <text class="t" x="485" y="219" text-anchor="middle">Edge cache</text>
+  <text class="s" x="485" y="239" text-anchor="middle">pages + files</text>
+
+  <!-- Origin-request -->
+  <rect class="box" x="580" y="70" width="135" height="110" rx="10" style="stroke: var(--lambda);"/>
+  <text class="t" x="647" y="98" text-anchor="middle">Lambda@Edge</text>
+  <text class="s" x="647" y="117" text-anchor="middle">origin-request</text>
+  <text class="s" x="647" y="135" text-anchor="middle">builds PEP 503</text>
+  <text class="s" x="647" y="151" text-anchor="middle">/simple/ pages</text>
+
+  <!-- Secrets Manager -->
+  <rect class="box" x="225" y="440" width="165" height="76" rx="10" style="stroke: var(--sec);"/>
+  <text class="t" x="307" y="472" text-anchor="middle">Secrets Manager</text>
+  <text class="s" x="307" y="492" text-anchor="middle">{"user": "password"}</text>
+
+  <!-- pypi.org -->
+  <rect class="box" x="780" y="40" width="200" height="80" rx="10" style="stroke: var(--ext);"/>
+  <text class="t" x="880" y="74" text-anchor="middle">pypi.org/simple</text>
+  <text class="s" x="880" y="94" text-anchor="middle">fallback (optional)</text>
+
+  <!-- S3 -->
+  <rect class="box" x="780" y="235" width="200" height="90" rx="10" style="stroke: var(--s3);"/>
+  <text class="t" x="880" y="267" text-anchor="middle">Amazon S3</text>
+  <text class="s" x="880" y="287" text-anchor="middle">&lt;package&gt;/&lt;file&gt;.whl</text>
+  <text class="s" x="880" y="305" text-anchor="middle">private, read via OAC</text>
+
+  <!-- Arrows -->
+  <path class="a" d="M170,225 L223,225"/>
+  <text class="lbl" x="196" y="215" text-anchor="middle">HTTPS</text>
+
+  <path class="a d" d="M300,277 L300,438" marker-start="url(#arrow)"/>
+  <text class="lbl" x="310" y="362">credentials,</text>
+  <text class="lbl" x="310" y="378">cached in memory</text>
+  <text class="lbl" x="232" y="300" style="fill: var(--sec);">401 if wrong</text>
+
+  <path class="a" d="M390,225 L423,225"/>
+
+  <path class="a" d="M545,205 C565,205 565,150 578,150"/>
+  <text class="lbl" x="560" y="200">miss on</text>
+  <text class="lbl" x="560" y="214">/simple/*</text>
+
+  <path class="a" d="M715,100 L778,85"/>
+  <text class="lbl" x="722" y="78">unknown</text>
+  <text class="lbl" x="722" y="64">package</text>
+
+  <path class="a" d="M690,180 C700,230 740,262 778,265"/>
+  <text class="lbl" x="742" y="215">list</text>
+  <text class="lbl" x="742" y="229">objects</text>
+
+  <path class="a" d="M545,245 L778,295"/>
+  <text class="lbl" x="575" y="285">miss on a</text>
+  <text class="lbl" x="575" y="299">package file</text>
+
+  <!-- Footnote -->
+  <text class="s" x="420" y="470">Only index cache misses run the origin-request function.</text>
+  <text class="s" x="420" y="488">Package files are served from the cache or straight from S3.</text>
+</svg>

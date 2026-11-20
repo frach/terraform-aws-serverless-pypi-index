@@ -61,34 +61,7 @@ Check the [AWS Pricing Calculator](https://calculator.aws/) for your own numbers
 This module provisions an event-driven, edge-optimized private Python package registry compliant with the
 **PEP 503 (Simple Repository API)** specification.
 
-```text
-          ┌───────────────────┐
-          │    pip / poetry   │
-          └─────────┬─────────┘
-                    │
-                    ▼  (HTTPS GET request, optional Basic Auth)
-          ┌───────────────────┐       ┌─────────────────────┐
-          │ Lambda@Edge       │ ◄───► │ AWS Secrets Manager │
-          │ (viewer-request)  │       │ (cached credentials)│
-          └─────────┬─────────┘       └─────────────────────┘
-                    │  401 if credentials are missing or invalid
-                    ▼
-          ┌───────────────────┐
-          │ Amazon CloudFront │  ◄─── [Cache Hit]
-          └─────────┬─────────┘
-                    │
-                    ▼  (Cache Miss)
-          ┌───────────────────┐
-          │ Lambda@Edge       │  ◄─── [Loads config.json sidecar]
-          │ (origin-request)  │
-          └────┬─────────┬────┘
-               │         │  package not in S3 (upstream enabled)
-               ▼         ▼
-     ┌─────────────┐  ┌──────────────────────┐
-     │  Amazon S3  │  │ pypi.org/simple (or  │
-     │ flat layout │  │ any PEP 503 mirror)  │
-     └─────────────┘  └──────────────────────┘
-```
+![Architecture: pip calls CloudFront; Lambda@Edge checks Basic Auth against Secrets Manager and builds /simple/ pages from S3 or forwards to pypi.org; package files come from S3 through OAC](https://raw.githubusercontent.com/frach/terraform-aws-serverless-pypi-index/main/docs/architecture.svg)
 
 ### 📡 Request Lifecycle & Data Flow
 1. **Edge Authentication** *(optional)*: When `auth_enabled = true`, a **viewer-request** trigger validates HTTP Basic Auth on every request, cache hits included, against credentials in **AWS Secrets Manager**. Credentials are cached in memory for `auth_cache_ttl` seconds.
