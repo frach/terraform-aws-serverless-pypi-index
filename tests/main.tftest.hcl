@@ -53,6 +53,16 @@ run "defaults" {
     condition     = length(aws_secretsmanager_secret.auth) == 0 && length(aws_route53_record.alias) == 0 && length(aws_s3_bucket_policy.s3_bucket_policy) == 0
     error_message = "Optional resources must not be created by default."
   }
+
+  assert {
+    condition     = aws_cloudwatch_log_group.lambda_edge.retention_in_days == 30
+    error_message = "The Lambda@Edge log group must have a finite retention by default."
+  }
+
+  assert {
+    condition     = length(data.aws_cloudfront_response_headers_policy.security_headers) == 1
+    error_message = "The managed security headers policy must be used by default."
+  }
 }
 
 run "name_and_tags" {
@@ -183,4 +193,17 @@ run "upstream_must_be_https" {
   }
 
   expect_failures = [var.upstream_index_url]
+}
+
+run "custom_response_headers_policy" {
+  command = plan
+
+  variables {
+    cloudfront_response_headers_policy_id = "my-policy-id"
+  }
+
+  assert {
+    condition     = length(data.aws_cloudfront_response_headers_policy.security_headers) == 0
+    error_message = "A custom response headers policy must replace the managed one."
+  }
 }

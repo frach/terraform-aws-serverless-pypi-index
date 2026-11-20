@@ -18,6 +18,27 @@ output "cloudfront_distribution_arn" {
   description = "The ARN of the CloudFront distribution"
 }
 
+output "uploader_policy_json" {
+  value = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "UploadPackages"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject", "s3:GetObject", "s3:ListBucket"]
+        Resource = [local.s3_bucket_arn, "${local.s3_bucket_arn}/*"]
+      },
+      {
+        Sid      = "InvalidateIndex"
+        Effect   = "Allow"
+        Action   = ["cloudfront:CreateInvalidation"]
+        Resource = module.cloudfront.cloudfront_distribution_arn
+      }
+    ]
+  })
+  description = "IAM policy JSON for a CI identity that uploads packages and invalidates /simple/* (attach it to e.g. a GitHub Actions OIDC role)"
+}
+
 output "s3_bucket_id" {
   value       = local.s3_bucket_id
   description = "The name of the S3 bucket"

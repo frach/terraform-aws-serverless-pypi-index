@@ -10,6 +10,10 @@ All notable changes to this project will be documented in this file.
 * `tags` input, applied to every resource that supports tags.
 * Custom domains: `cloudfront_aliases`, `cloudfront_acm_certificate_arn`, `cloudfront_minimum_protocol_version` and optional Route 53 alias records (`route53_zone_id`).
 * New outputs: `index_url`, `cloudfront_distribution_id`, `cloudfront_distribution_arn`.
+* Security headers on every response (HSTS, X-Content-Type-Options, X-Frame-Options, ...) via the managed `SecurityHeadersPolicy`, or your own policy with `cloudfront_response_headers_policy_id`.
+* Optional WAF (`cloudfront_web_acl_id`) and CloudFront access logs (`cloudfront_logging_bucket`, `cloudfront_logging_prefix`).
+* `log_retention_in_days` for the Lambda@Edge log group (default 30 days; it used to be kept forever).
+* `uploader_policy_json` output: least-privilege IAM policy for a CI identity that uploads packages and invalidates the index.
 
 ### Bug Fixes
 
@@ -23,6 +27,7 @@ All notable changes to this project will be documented in this file.
 ### Changes
 
 * **BREAKING:** `cloudfront_use_acm_certificate` input removed (it had no effect). Use `cloudfront_acm_certificate_arn` instead.
+* **BREAKING:** `s3_attach_deny_insecure_transport_policy` now defaults to `true`, so the bucket rejects non-HTTPS requests.
 
 ## [0.1.0] - 2026-10-19
 

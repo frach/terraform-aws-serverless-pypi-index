@@ -76,10 +76,42 @@ variable "cloudfront_minimum_protocol_version" {
   default     = "TLSv1.2_2025"
 }
 
+variable "cloudfront_response_headers_policy_id" {
+  description = "ID of a CloudFront response headers policy for every behavior. When null, the managed SecurityHeadersPolicy (HSTS, X-Content-Type-Options, X-Frame-Options, ...) is used"
+  type        = string
+  default     = null
+}
+
+variable "cloudfront_web_acl_id" {
+  description = "ARN of a WAFv2 web ACL (scope CLOUDFRONT, in us-east-1) to associate with the distribution, e.g. for rate limiting or IP allow-lists"
+  type        = string
+  default     = null
+}
+
+variable "cloudfront_logging_bucket" {
+  description = "Domain name of an S3 bucket for CloudFront standard access logs (e.g. \"my-logs.s3.amazonaws.com\"). The bucket must have ACLs enabled. When null, access logging is disabled"
+  type        = string
+  default     = null
+}
+
+variable "cloudfront_logging_prefix" {
+  description = "Prefix for CloudFront access log objects"
+  type        = string
+  default     = "serverless-pypi-index/"
+}
+
 variable "route53_zone_id" {
   description = "ID of a Route 53 hosted zone in which to create A/AAAA alias records for every name in cloudfront_aliases. When null, no DNS records are created"
   type        = string
   default     = null
+}
+
+
+# Logging variables
+variable "log_retention_in_days" {
+  description = "Retention of the Lambda@Edge log group in us-east-1. Log groups that Lambda@Edge creates in other regions are not managed by this module"
+  type        = number
+  default     = 30
 }
 
 
@@ -184,9 +216,9 @@ variable "s3_admin_principal_arns" {
 }
 
 variable "s3_attach_deny_insecure_transport_policy" {
-  description = "Flag to attach deny insecure transport policy"
+  description = "Flag to attach a bucket policy that denies requests not made over HTTPS"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "s3_attach_require_latest_tls_policy" {
