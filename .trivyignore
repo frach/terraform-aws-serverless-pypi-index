@@ -1,0 +1,5 @@
+# Accepted findings. Each entry needs a reason.
+
+# S3 encryption with a customer managed KMS key: the bucket uses SSE-S3 (AWS managed keys).
+# Packages are not secret by themselves; CMK support can be added as an opt-in input.
+AWS-0132
