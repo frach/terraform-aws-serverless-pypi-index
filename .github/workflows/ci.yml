@@ -72,3 +72,72 @@ jobs:
 
       - name: Run tests
         run: make test
+
+  terraform-test:
+    name: Terraform test (${{ matrix.tool }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: [terraform, tofu]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        if: matrix.tool == 'terraform'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: latest
+          terraform_wrapper: false
+
+      - name: Setup OpenTofu
+        if: matrix.tool == 'tofu'
+        uses: opentofu/setup-opentofu@v2
+        with:
+          tofu_version: 1.13.9
+          tofu_wrapper: false
+
+      - name: Validate module and examples
+        run: |
+          for dir in . examples/*/; do
+            echo "==> ${{ matrix.tool }} validate $dir"
+            ${{ matrix.tool }} -chdir="$dir" init -backend=false -input=false >/dev/null
+            ${{ matrix.tool }} -chdir="$dir" validate
+          done
+
+      - name: Run unit tests (mocked providers)
+        run: ${{ matrix.tool }} test
+
+  security:
+    name: Security scan (Trivy)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Scan IaC (SARIF report)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          format: sarif
+          output: trivy.sarif
+          exit-code: "0"
+
+      - name: Upload results to GitHub Security
+        if: always() && github.event_name == 'push'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
+
+      - name: Fail on high and critical findings
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          severity: HIGH,CRITICAL
+          trivyignores: .trivyignore
+          exit-code: "1"

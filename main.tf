@@ -212,8 +212,8 @@ module "cloudfront" {
   # Origins
   origin = {
     s3_origin = {
-      domain_name           = local.s3_bucket_regional_domain_name
-      origin_access_control = "s3_oac" # Key from `origin_access_control` block
+      domain_name               = local.s3_bucket_regional_domain_name
+      origin_access_control_key = "s3_oac" # Key from `origin_access_control` block
     }
   }
   vpc_origin = {}

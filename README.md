@@ -187,9 +187,10 @@ Also:
 ---
 
 ## 🧪 Testing & Requirements
-Run the Lambda unit tests with pytest, or every local check (pre-commit, `terraform validate`, tests):
+Run the Lambda unit tests (pytest), the Terraform unit tests (`terraform test` with mocked providers, no AWS account needed), or every local check:
 ```bash
 make test
+make tf-test
 make check
 ```
 * **Terraform**: `>= 1.5.7` (or OpenTofu)

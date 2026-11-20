@@ -11,6 +11,10 @@ All notable changes to this project will be documented in this file.
 * Custom domains: `cloudfront_aliases`, `cloudfront_acm_certificate_arn`, `cloudfront_minimum_protocol_version` and optional Route 53 alias records (`route53_zone_id`).
 * New outputs: `index_url`, `cloudfront_distribution_id`, `cloudfront_distribution_arn`.
 
+### Bug Fixes
+
+* The S3 origin now actually uses the Origin Access Control. The `origin_access_control` attribute was silently ignored by the CloudFront module, so CloudFront couldn't read package files from the private bucket.
+
 ### Security
 
 * Index pages HTML-escape package and file names and URL-encode links, so object keys or crafted request paths can't inject markup.

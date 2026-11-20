@@ -104,6 +104,12 @@ validate: ## Run terraform init + validate
 	@terraform init -backend=false -input=false
 	@terraform validate
 
+.PHONY: tf-test
+tf-test: ## Run Terraform unit tests with mocked providers (Terraform >= 1.7)
+	@echo "==> Running terraform test..."
+	@terraform init -backend=false -input=false
+	@terraform test
+
 .PHONY: docs
 docs: $(TFDOCS) ## Generate Terraform docs into README.md
 	@echo "==> Generating terraform-docs..."
@@ -140,7 +146,7 @@ format: install-python ## Format Python with Black
 # ==============================================================================
 
 .PHONY: check
-check: pre-commit validate test ## Run full local CI suite
+check: pre-commit validate tf-test test ## Run full local CI suite
 
 .PHONY: clean
 clean: ## Remove caches, venv, and downloaded binaries
