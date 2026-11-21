@@ -148,6 +148,32 @@ data "aws_iam_policy_document" "s3_bucket" {
       }
     }
   }
+
+  # A created bucket gets this statement from the S3 module; an existing bucket only gets this policy
+  dynamic "statement" {
+    for_each = !var.s3_create_bucket && var.s3_attach_deny_insecure_transport_policy ? [1] : []
+
+    content {
+      sid     = "denyInsecureTransport"
+      effect  = "Deny"
+      actions = ["s3:*"]
+      resources = [
+        "${local.s3_bucket_arn}/*",
+        local.s3_bucket_arn
+      ]
+
+      principals {
+        type        = "*"
+        identifiers = ["*"]
+      }
+
+      condition {
+        test     = "Bool"
+        variable = "aws:SecureTransport"
+        values   = ["false"]
+      }
+    }
+  }
 }
 
 # Only for an existing bucket; a created bucket gets the policy through the S3 module.
@@ -211,13 +237,14 @@ module "cloudfront" {
 
   logging_config = var.cloudfront_logging_bucket != null ? {
     bucket          = var.cloudfront_logging_bucket
-    prefix          = var.cloudfront_logging_prefix
+    prefix          = coalesce(var.cloudfront_logging_prefix, "${var.name}/")
     include_cookies = false
   } : null
 
   # Access control
   origin_access_control = {
     s3_oac = {
+      name             = "${local.resources_name_prefix}-s3" # Must be unique per AWS account
       description      = "CloudFront access to S3"
       origin_type      = "s3"
       signing_behavior = "always"

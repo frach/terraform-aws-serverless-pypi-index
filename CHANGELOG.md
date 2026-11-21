@@ -22,9 +22,15 @@ All notable changes to this project will be documented in this file.
 ### Bug Fixes
 
 * The S3 origin now actually uses the Origin Access Control. The `origin_access_control` attribute was silently ignored by the CloudFront module, so CloudFront couldn't read package files from the private bucket.
+* The Origin Access Control is named after `name` (`<name>-s3`) instead of the fixed `s3_oac`, so a second deployment in the same AWS account no longer fails with `OriginAccessControlAlreadyExists`.
+* An existing bucket (`s3_create_bucket = false`) now also gets the deny-insecure-transport statement when `s3_attach_deny_insecure_transport_policy` is true. The other `s3_attach_*` flags still apply only to a bucket created by the module.
+* `cloudfront_logging_prefix` defaults to `<name>/`, so deployments sharing a log bucket don't mix their logs.
+* GitHub Actions example: the package folder is derived correctly from sdists whose file name keeps dashes (`my-package-1.0.0.tar.gz`).
+* `make e2e` tears the deployment down even when `terraform apply` fails half-way.
 
 ### Security
 
+* CI pins `aquasecurity/trivy-action` to a commit SHA instead of a mutable tag.
 * Index pages HTML-escape package and file names and URL-encode links, so object keys or crafted request paths can't inject markup.
 * S3 errors are logged to CloudWatch instead of being returned to clients.
 

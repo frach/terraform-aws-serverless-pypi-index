@@ -33,8 +33,15 @@ jobs:
       - name: Upload to the index
         run: |
           for file in dist/*; do
-            # PEP 503 normalized project name, e.g. My_Package-1.0.0-py3-none-any.whl -> my-package
-            name=$(basename "$file" | cut -d- -f1 | tr '[:upper:]' '[:lower:]' | sed -E 's/[-_.]+/-/g')
+            # PEP 503 normalized project name, e.g. My_Package-1.0.0-py3-none-any.whl -> my-package.
+            # Older sdists keep dashes in the name (my-package-1.0.0.tar.gz), so strip only the version there
+            base=$(basename "$file")
+            case "$base" in
+              *.whl) raw=${base%%-*} ;;
+              *.tar.gz) raw=${base%.tar.gz} && raw=${raw%-*} ;;
+              *) echo "::error::Unknown distribution file $base" && exit 1 ;;
+            esac
+            name=$(echo "$raw" | tr '[:upper:]' '[:lower:]' | sed -E 's/[-_.]+/-/g')
             # Never overwrite a published file: package files are cached as immutable
             if aws s3api head-object --bucket "${{ vars.PYPI_BUCKET }}" --key "$name/$(basename "$file")" >/dev/null 2>&1; then
               echo "::error::$name/$(basename "$file") already exists. Bump the version."

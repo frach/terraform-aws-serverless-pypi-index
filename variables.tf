@@ -95,9 +95,9 @@ variable "cloudfront_logging_bucket" {
 }
 
 variable "cloudfront_logging_prefix" {
-  description = "Prefix for CloudFront access log objects"
+  description = "Prefix for CloudFront access log objects. When null, \"<name>/\" is used"
   type        = string
-  default     = "serverless-pypi-index/"
+  default     = null
 }
 
 variable "route53_zone_id" {

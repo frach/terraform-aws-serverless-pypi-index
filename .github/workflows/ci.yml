@@ -120,7 +120,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Scan IaC (SARIF report)
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
           format: sarif
@@ -135,7 +135,7 @@ jobs:
           category: trivy
 
       - name: Fail on high and critical findings
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
           severity: HIGH,CRITICAL
