@@ -27,6 +27,7 @@ All notable changes to this project will be documented in this file.
 * `cloudfront_logging_prefix` defaults to `<name>/`, so deployments sharing a log bucket don't mix their logs.
 * GitHub Actions example: the package folder is derived correctly from sdists whose file name keeps dashes (`my-package-1.0.0.tar.gz`).
 * `make e2e` tears the deployment down even when `terraform apply` fails half-way.
+* No perpetual `minimum_protocol_version` diff with the default `*.cloudfront.net` certificate: the module sends `TLSv1` there, which AWS stores anyway. `cloudfront_minimum_protocol_version` applies only with `cloudfront_acm_certificate_arn`.
 
 ### Security
 
