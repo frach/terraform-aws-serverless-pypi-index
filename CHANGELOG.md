@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-21
+
 ### Features
 
 * `name` input: prefix of every resource name, so the module can be deployed more than once in the same AWS account (default `serverless-pypi-index`, so existing deployments keep their names).
@@ -27,6 +29,7 @@ All notable changes to this project will be documented in this file.
 * `cloudfront_logging_prefix` defaults to `<name>/`, so deployments sharing a log bucket don't mix their logs.
 * GitHub Actions example: the package folder is derived correctly from sdists whose file name keeps dashes (`my-package-1.0.0.tar.gz`).
 * `make e2e` tears the deployment down even when `terraform apply` fails half-way.
+* No perpetual `minimum_protocol_version` diff with the default `*.cloudfront.net` certificate: the module sends `TLSv1` there, which AWS stores anyway. `cloudfront_minimum_protocol_version` applies only with `cloudfront_acm_certificate_arn`.
 
 ### Security
 
@@ -68,5 +71,6 @@ First tagged release. **BREAKING** items refer to changes since the untagged pre
 * The Lambda package is built with `archive_file` (index.py + generated config.json in memory) on plain `aws_lambda_function`/IAM resources, instead of `local_file` writing into the module directory. See the README for `terraform state mv` upgrade commands.
 * Minimum Terraform version lowered to `1.5.7` (the floor of the wrapped terraform-aws-modules; also OpenTofu compatible). Minimum AWS provider raised to `6.28.0` to match those modules.
 
-[Unreleased]: https://github.com/frach/terraform-aws-serverless-pypi-index/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/frach/terraform-aws-serverless-pypi-index/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/frach/terraform-aws-serverless-pypi-index/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/frach/terraform-aws-serverless-pypi-index/releases/tag/v0.1.0

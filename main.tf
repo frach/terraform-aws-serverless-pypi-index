@@ -301,12 +301,13 @@ module "cloudfront" {
     }
   }
 
-  # A custom domain needs an ACM certificate (in us-east-1) covering every alias
+  # A custom domain needs an ACM certificate (in us-east-1) covering every alias.
+  # AWS always stores TLSv1 for the default certificate, so sending anything else causes a perpetual diff
   viewer_certificate = {
     cloudfront_default_certificate = var.cloudfront_acm_certificate_arn == null
     acm_certificate_arn            = var.cloudfront_acm_certificate_arn
     ssl_support_method             = var.cloudfront_acm_certificate_arn != null ? "sni-only" : null
-    minimum_protocol_version       = var.cloudfront_minimum_protocol_version
+    minimum_protocol_version       = var.cloudfront_acm_certificate_arn != null ? var.cloudfront_minimum_protocol_version : "TLSv1"
   }
 
   tags = var.tags
