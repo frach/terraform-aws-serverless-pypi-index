@@ -166,9 +166,17 @@ case "${1:-run}" in
   test) run_tests ;;
   down) down ;;
   run)
-    up
-    status=0
-    run_tests || status=$?
+    # Tear down even when the deployment fails half-way, so no partial resources are left behind
+    set +e
+    (
+      set -e
+      up
+    )
+    status=$?
+    if ((status == 0)); then
+      run_tests
+      status=$?
+    fi
     if [[ "${KEEP:-0}" == "1" ]]; then
       log "KEEP=1: leaving the deployment up. Remove it with: $0 down"
     else
