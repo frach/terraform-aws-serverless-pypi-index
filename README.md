@@ -10,6 +10,9 @@ A private PyPI index on AWS for cents a month: packages in **S3**, served throug
 by **Lambda@Edge**. Works with plain `pip`, `uv` and Poetry, with optional Basic Auth and a pypi.org fallback. Nothing runs when
 nobody installs anything.
 
+With the pypi.org fallback on, it is also **one controlled entry point for every package your team installs**, private and public:
+private names can't be hijacked from pypi.org, and every install goes through infrastructure in your own AWS account.
+
 ```hcl
 module "pypi" {
   source = "git::https://github.com/frach/terraform-aws-serverless-pypi-index.git?ref=v0.1.0"
@@ -54,6 +57,22 @@ Example: 5 GB of packages, 100k requests and 20 GB of downloads a month, with au
 Without auth, Lambda@Edge only runs on index cache misses and the secret isn't created, so the total is close to the S3 storage cost.
 Check the [AWS Pricing Calculator](https://calculator.aws/) for your own numbers.
 
+## 🛡️ Supply-chain safety
+
+Malicious releases of popular packages are now routine: in March 2026 a hijacked LiteLLM release reached a package with about
+95 million downloads a month, and reports count far more malicious packages in 2026 than a year before. A private index you
+control is the place to put guardrails in front of `pip install`:
+
+* **No dependency confusion**: if any file of a package exists in your bucket, only your files are served. A public package with
+  the same name is never consulted.
+* **One choke point**: every install, from laptops and CI, goes through your CloudFront distribution. Turn on access logs
+  (`cloudfront_logging_bucket`) to see what was downloaded, and attach a WAF (`cloudfront_web_acl_id`) for IP allow-lists or rate
+  limits.
+* **No AWS credentials on clients**: static Basic Auth instead of short-lived CodeArtifact tokens, so CI jobs need no AWS role just
+  to install packages.
+* **Next: dependency cooldown**, i.e. not serving versions published less than N days ago (see the [roadmap](#-roadmap)).
+  Most hijacked releases are found and yanked within days.
+
 ---
 
 ## 🏗️ Architecture Overview & Deep Dive
@@ -65,11 +84,11 @@ This module provisions an event-driven, edge-optimized private Python package re
 
 ### 📡 Request Lifecycle & Data Flow
 1. **Edge Authentication** *(optional)*: When `auth_enabled = true`, a **viewer-request** trigger validates HTTP Basic Auth on every request, cache hits included, against credentials in **AWS Secrets Manager**. Credentials are cached in memory for `auth_cache_ttl` seconds.
-2. **Sub-Millisecond Caching Layer**: CloudFront returns cached metadata instantly.
-3. **Decoupled Serverless Processing**: Cache misses trigger the **origin-request** function, reading an isolated `config.json` sidecar and querying S3 via `list_objects_v2`.
-4. **PEP 503 On-The-Fly Generation**: Lambda normalizes S3 keys into a lightweight HTML index string.
+2. **Caching**: CloudFront returns cached index pages without invoking Lambda.
+3. **Index generation**: Cache misses trigger the **origin-request** function, reading an isolated `config.json` sidecar and querying S3 via `list_objects_v2`.
+4. **PEP 503 pages**: Lambda normalizes S3 keys into a lightweight HTML index string.
 5. **Upstream Proxy** *(optional)*: When `upstream_enabled = true` and a package has **no files in S3**, the request is re-routed to `upstream_index_url` (default `https://pypi.org/simple`). CloudFront then fetches and caches the upstream page. File links on that page point straight at `files.pythonhosted.org`.
-6. **Direct Asset Passthrough**: Binary wheel requests pass securely and directly from S3 through CloudFront.
+6. **Package files**: Wheels and sdists are served from S3 through CloudFront with Origin Access Control; the bucket stays private.
 
 ### ⚙️ DevOps & Security Optimizations
 - **Deterministic Packaging**: The Lambda zip is built in memory from `index.py` plus a generated `config.json`. Nothing is written into the module directory, and the function only redeploys when the zip hash changes.
@@ -78,11 +97,11 @@ This module provisions an event-driven, edge-optimized private Python package re
 ---
 
 ## 🚀 Key Features
-- **True Serverless Architecture**: Scale-to-zero model with no idle infrastructure costs.
-- **PEP 503 Simple API Compliant**: Works with `pip`, `uv` and Poetry.
-- **High Performance at Edge**: Global low latency via CloudFront.
-- **Basic Authentication**: Optional, enforced at the edge, credentials in Secrets Manager.
-- **Upstream Proxy**: Optional PyPI fallback, so one index URL serves both private and public packages.
+- **Serverless**: no servers to patch, close to $0 when idle.
+- **PEP 503 Simple API**: works with `pip`, `uv` and Poetry.
+- **Basic Authentication**: optional, enforced at the edge on every request, credentials in Secrets Manager.
+- **Upstream Proxy**: optional pypi.org fallback, so one index URL serves both private and public packages, with private names always winning.
+- **Hardened defaults**: private bucket with HTTPS only, security headers, log retention, optional WAF, access logs and custom domain.
 
 ---
 
@@ -172,9 +191,30 @@ module "pypi" {
 ## 📦 Python Ecosystem Client Integration
 
 ### 1. Installing Packages
-* **Pip**: `pip install --index-url https://<cloudfront-domain>/simple/ <package>`
-* **Poetry**: Set priority to `supplemental` pointing to the `/simple/` endpoint.
-* **UV**: `uv pip install --index-url https://<cloudfront-domain>/simple/ <package>`
+Use the `index_url` output (e.g. `https://pypi.example.com/simple/`). The examples assume `upstream_enabled = true`, so the index
+replaces pypi.org. Without the fallback, add it as an extra index instead (`extra-index-url`, `default = false`, `supplemental`).
+
+**pip** (`~/.config/pip/pip.conf` or `PIP_INDEX_URL` in CI):
+```ini
+[global]
+index-url = https://pypi.example.com/simple/
+```
+Credentials come from `~/.netrc` (`machine pypi.example.com login ci password ...`), keyring, or `https://user:password@...` in the URL.
+
+**uv** (`pyproject.toml`):
+```toml
+[[tool.uv.index]]
+name = "private"
+url = "https://pypi.example.com/simple/"
+default = true
+```
+Credentials: `UV_INDEX_PRIVATE_USERNAME` and `UV_INDEX_PRIVATE_PASSWORD`.
+
+**Poetry**:
+```bash
+poetry source add --priority=primary private https://pypi.example.com/simple/
+poetry config http-basic.private <user> <password>
+```
 
 ### 2. Uploading Packages
 Upload with the AWS CLI under the PEP 503 normalized project name (lowercase, runs of `-`, `_`, `.` replaced by `-`):
@@ -261,13 +301,17 @@ Versions follow [SemVer](https://semver.org) with `v`-prefixed tags. Before `1.0
 
 ---
 
-## 📌 Roadmap & Upcoming Features (TODO)
+## 📌 Roadmap
 
-Contributions and architectural enhancements are welcome for the following scheduled features:
+Contributions are welcome. Done and planned:
 
 - [x] **Edge Authentication Layer**: HTTP **Basic Authentication** at the edge, credentials in **AWS Secrets Manager** with in-memory caching.
 - [x] **Upstream Proxy**: Fallback to `pypi.org` (or any PEP 503 mirror) for packages not hosted locally.
 - [x] **Custom Domain**: CloudFront aliases with an ACM certificate and optional Route 53 alias records.
+- [x] **Hardened defaults**: security headers, HTTPS-only bucket, log retention, optional WAF and access logs.
+- [ ] **Dependency cooldown**: don't serve upstream versions published less than N days ago, with per-package exceptions.
+- [ ] **Integrity**: `#sha256=` hashes in index links, PEP 691 (JSON) and PEP 658 (metadata).
+- [ ] **Publishing**: a `publish` script or GitHub Action that uploads, normalizes names and invalidates the index.
 
 ---
 

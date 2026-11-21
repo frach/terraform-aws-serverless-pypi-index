@@ -15,6 +15,10 @@ All notable changes to this project will be documented in this file.
 * `log_retention_in_days` for the Lambda@Edge log group (default 30 days; it used to be kept forever).
 * `uploader_policy_json` output: least-privilege IAM policy for a CI identity that uploads packages and invalidates the index.
 
+### Documentation
+
+* README: supply-chain safety section, concrete pip, uv and Poetry setup, roadmap with dependency cooldown, fewer buzzwords.
+
 ### Bug Fixes
 
 * The S3 origin now actually uses the Origin Access Control. The `origin_access_control` attribute was silently ignored by the CloudFront module, so CloudFront couldn't read package files from the private bucket.
