@@ -1,8 +1,77 @@
 # AWS Serverless PyPI Index (Terraform Module)
 
-A production-ready, highly cost-effective, and fully serverless private PyPI index hosted entirely on AWS using **Amazon S3**,
-**Amazon CloudFront**, and **AWS Lambda** to deliver a secure, fast, and scalable private Python package registry at virtually
-**\$0/month** on low-to-medium usage.
+[![CI](https://github.com/frach/terraform-aws-serverless-pypi-index/actions/workflows/ci.yml/badge.svg)](https://github.com/frach/terraform-aws-serverless-pypi-index/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/frach/terraform-aws-serverless-pypi-index)](https://github.com/frach/terraform-aws-serverless-pypi-index/releases)
+[![License](https://img.shields.io/github/license/frach/terraform-aws-serverless-pypi-index)](LICENSE)
+![Terraform](https://img.shields.io/badge/Terraform-%E2%89%A51.5.7-7B42BC?logo=terraform)
+![OpenTofu](https://img.shields.io/badge/OpenTofu-compatible-FFDA18?logo=opentofu)
+
+A private PyPI index on AWS for cents a month: packages in **S3**, served through **CloudFront**, with the PEP 503 index generated
+by **Lambda@Edge**. Works with plain `pip`, `uv` and Poetry, with optional Basic Auth and a pypi.org fallback. Nothing runs when
+nobody installs anything.
+
+With the pypi.org fallback on, it is also **one controlled entry point for every package your team installs**, private and public:
+private names can't be hijacked from pypi.org, and every install goes through infrastructure in your own AWS account.
+
+```hcl
+module "pypi" {
+  source = "git::https://github.com/frach/terraform-aws-serverless-pypi-index.git?ref=v0.1.0"
+
+  auth_enabled     = true # Basic Auth, credentials in Secrets Manager
+  upstream_enabled = true # serve everything else from pypi.org
+}
+```
+
+```bash
+pip install --index-url https://user:password@<your-domain>/simple/ my-private-package requests
+```
+
+---
+
+## 🤔 Why not AWS CodeArtifact?
+
+CodeArtifact is a good fit inside AWS-heavy organizations, but every client needs a short-lived token
+(`aws codeartifact login`, valid for at most 12 hours) and therefore AWS credentials, on every laptop and in every CI job.
+
+| | This module | AWS CodeArtifact | Self-hosted (pypiserver, devpi) |
+|---|---|---|---|
+| Client auth | Static Basic Auth, works with `.netrc`, keyring, `pip.conf` | IAM + token that expires after ≤ 12 h | Depends on setup |
+| Clients need AWS credentials | No | Yes | No |
+| Fallback to pypi.org | Yes, private names always win | Yes (upstream repository) | devpi: yes |
+| Servers to patch | None | None | Yes |
+| Idle cost | ~$0 (+ $0.40/month with auth) | ~$0 | A VM or container 24/7 |
+| Upload | `aws s3 cp` / [GitHub Actions example](examples/github-actions-upload) | `twine upload` | `twine upload` |
+
+## 💸 What does it cost?
+
+Example: 5 GB of packages, 100k requests and 20 GB of downloads a month, with auth enabled (us-east-1 list prices, rounded):
+
+| Service | Monthly cost |
+|---|---|
+| S3 storage (5 GB) | ~$0.12 |
+| CloudFront (within the always-free 1 TB / 10M requests tier) | $0.00 |
+| Lambda@Edge auth check on 100k requests | ~$0.10 |
+| Secrets Manager (1 secret, cached reads) | ~$0.40 |
+| **Total** | **~$0.60** |
+
+Without auth, Lambda@Edge only runs on index cache misses and the secret isn't created, so the total is close to the S3 storage cost.
+Check the [AWS Pricing Calculator](https://calculator.aws/) for your own numbers.
+
+## 🛡️ Supply-chain safety
+
+Malicious releases of popular packages are now routine: in March 2026 a hijacked LiteLLM release reached a package with about
+95 million downloads a month, and reports count far more malicious packages in 2026 than a year before. A private index you
+control is the place to put guardrails in front of `pip install`:
+
+* **No dependency confusion**: if any file of a package exists in your bucket, only your files are served. A public package with
+  the same name is never consulted.
+* **One choke point**: every install, from laptops and CI, goes through your CloudFront distribution. Turn on access logs
+  (`cloudfront_logging_bucket`) to see what was downloaded, and attach a WAF (`cloudfront_web_acl_id`) for IP allow-lists or rate
+  limits.
+* **No AWS credentials on clients**: static Basic Auth instead of short-lived CodeArtifact tokens, so CI jobs need no AWS role just
+  to install packages.
+* **Next: dependency cooldown**, i.e. not serving versions published less than N days ago (see the [roadmap](#-roadmap)).
+  Most hijacked releases are found and yanked within days.
 
 ---
 
@@ -11,42 +80,15 @@ A production-ready, highly cost-effective, and fully serverless private PyPI ind
 This module provisions an event-driven, edge-optimized private Python package registry compliant with the
 **PEP 503 (Simple Repository API)** specification.
 
-```text
-          ┌───────────────────┐
-          │    pip / poetry   │
-          └─────────┬─────────┘
-                    │
-                    ▼  (HTTPS GET request, optional Basic Auth)
-          ┌───────────────────┐       ┌─────────────────────┐
-          │ Lambda@Edge       │ ◄───► │ AWS Secrets Manager │
-          │ (viewer-request)  │       │ (cached credentials)│
-          └─────────┬─────────┘       └─────────────────────┘
-                    │  401 if credentials are missing or invalid
-                    ▼
-          ┌───────────────────┐
-          │ Amazon CloudFront │  ◄─── [Cache Hit]
-          └─────────┬─────────┘
-                    │
-                    ▼  (Cache Miss)
-          ┌───────────────────┐
-          │ Lambda@Edge       │  ◄─── [Loads config.json sidecar]
-          │ (origin-request)  │
-          └────┬─────────┬────┘
-               │         │  package not in S3 (upstream enabled)
-               ▼         ▼
-     ┌─────────────┐  ┌──────────────────────┐
-     │  Amazon S3  │  │ pypi.org/simple (or  │
-     │ flat layout │  │ any PEP 503 mirror)  │
-     └─────────────┘  └──────────────────────┘
-```
+![Architecture: pip calls CloudFront; Lambda@Edge checks Basic Auth against Secrets Manager and builds /simple/ pages from S3 or forwards to pypi.org; package files come from S3 through OAC](https://raw.githubusercontent.com/frach/terraform-aws-serverless-pypi-index/main/docs/architecture.svg)
 
 ### 📡 Request Lifecycle & Data Flow
 1. **Edge Authentication** *(optional)*: When `auth_enabled = true`, a **viewer-request** trigger validates HTTP Basic Auth on every request, cache hits included, against credentials in **AWS Secrets Manager**. Credentials are cached in memory for `auth_cache_ttl` seconds.
-2. **Sub-Millisecond Caching Layer**: CloudFront returns cached metadata instantly.
-3. **Decoupled Serverless Processing**: Cache misses trigger the **origin-request** function, reading an isolated `config.json` sidecar and querying S3 via `list_objects_v2`.
-4. **PEP 503 On-The-Fly Generation**: Lambda normalizes S3 keys into a lightweight HTML index string.
+2. **Caching**: CloudFront returns cached index pages without invoking Lambda.
+3. **Index generation**: Cache misses trigger the **origin-request** function, reading an isolated `config.json` sidecar and querying S3 via `list_objects_v2`.
+4. **PEP 503 pages**: Lambda normalizes S3 keys into a lightweight HTML index string.
 5. **Upstream Proxy** *(optional)*: When `upstream_enabled = true` and a package has **no files in S3**, the request is re-routed to `upstream_index_url` (default `https://pypi.org/simple`). CloudFront then fetches and caches the upstream page. File links on that page point straight at `files.pythonhosted.org`.
-6. **Direct Asset Passthrough**: Binary wheel requests pass securely and directly from S3 through CloudFront.
+6. **Package files**: Wheels and sdists are served from S3 through CloudFront with Origin Access Control; the bucket stays private.
 
 ### ⚙️ DevOps & Security Optimizations
 - **Deterministic Packaging**: The Lambda zip is built in memory from `index.py` plus a generated `config.json`. Nothing is written into the module directory, and the function only redeploys when the zip hash changes.
@@ -55,11 +97,11 @@ This module provisions an event-driven, edge-optimized private Python package re
 ---
 
 ## 🚀 Key Features
-- **True Serverless Architecture**: Scale-to-zero model with no idle infrastructure costs.
-- **PEP 503 Simple API Compliant**: Works seamlessly with `pip`, `poetry`, `uv`, and `twine`.
-- **High Performance at Edge**: Global low latency via CloudFront.
-- **Basic Authentication**: Optional, enforced at the edge, credentials in Secrets Manager.
-- **Upstream Proxy**: Optional PyPI fallback, so one index URL serves both private and public packages.
+- **Serverless**: no servers to patch, close to $0 when idle.
+- **PEP 503 Simple API**: works with `pip`, `uv` and Poetry.
+- **Basic Authentication**: optional, enforced at the edge on every request, credentials in Secrets Manager.
+- **Upstream Proxy**: optional pypi.org fallback, so one index URL serves both private and public packages, with private names always winning.
+- **Hardened defaults**: private bucket with HTTPS only, security headers, log retention, optional WAF, access logs and custom domain.
 
 ---
 
@@ -149,15 +191,50 @@ module "pypi" {
 ## 📦 Python Ecosystem Client Integration
 
 ### 1. Installing Packages
-* **Pip**: `pip install --index-url https://<cloudfront-domain>/simple/ <package>`
-* **Poetry**: Set priority to `supplemental` pointing to the `/simple/` endpoint.
-* **UV**: `uv pip install --index-url https://<cloudfront-domain>/simple/ <package>`
+Use the `index_url` output (e.g. `https://pypi.example.com/simple/`). The examples assume `upstream_enabled = true`, so the index
+replaces pypi.org. Without the fallback, add it as an extra index instead (`extra-index-url`, `default = false`, `supplemental`).
+
+**pip** (`~/.config/pip/pip.conf` or `PIP_INDEX_URL` in CI):
+```ini
+[global]
+index-url = https://pypi.example.com/simple/
+```
+Credentials come from `~/.netrc` (`machine pypi.example.com login ci password ...`), keyring, or `https://user:password@...` in the URL.
+
+**uv** (`pyproject.toml`):
+```toml
+[[tool.uv.index]]
+name = "private"
+url = "https://pypi.example.com/simple/"
+default = true
+```
+Credentials: `UV_INDEX_PRIVATE_USERNAME` and `UV_INDEX_PRIVATE_PASSWORD`.
+
+**Poetry**:
+```bash
+poetry source add --priority=primary private https://pypi.example.com/simple/
+poetry config http-basic.private <user> <password>
+```
 
 ### 2. Uploading Packages
-Upload via AWS CLI using the flat key convention:
+Upload with the AWS CLI under the PEP 503 normalized project name (lowercase, runs of `-`, `_`, `.` replaced by `-`):
 ```bash
-aws s3 cp dist/package.whl s3://my-company-private-pypi-storage/package/package.whl
+aws s3 cp dist/my_package-1.0.0-py3-none-any.whl "s3://$(terraform output -raw s3_bucket_id)/my-package/"
 ```
+Don't overwrite published files: package files are cached as immutable. New files show up in `/simple/` after `cloudfront_ttl_default`
+seconds, or right away after an invalidation of `/simple/*`. The [GitHub Actions example](examples/github-actions-upload) does all of
+this with an OIDC role limited to the `uploader_policy_json` output.
+
+---
+
+## 📚 Examples
+
+| Example | What it shows |
+|---|---|
+| [basic](examples/basic) | Smallest deployment, public index on the CloudFront domain |
+| [private-with-auth](examples/private-with-auth) | Basic Auth with credentials kept out of the Terraform state, plus pypi.org fallback |
+| [custom-domain](examples/custom-domain) | `pypi.example.com` with an ACM certificate and Route 53 records |
+| [github-actions-upload](examples/github-actions-upload) | Publishing packages from CI through an OIDC role, no AWS keys |
 
 ---
 
@@ -193,6 +270,15 @@ make test
 make tf-test
 make check
 ```
+
+Before a release, run the end-to-end test against a sandbox AWS account. It deploys the module from your checkout, publishes a
+small package and checks auth, the PEP 503 pages, package downloads, security headers, `pip install` and the pypi.org fallback,
+then tears everything down (a few cents, 15-20 minutes):
+```bash
+AWS_PROFILE=sandbox AWS_REGION=eu-central-1 make e2e
+```
+Lambda@Edge functions can only be deleted a few hours after their CloudFront distribution, so the teardown may stop at the
+function. Finish it later with `make e2e-destroy`.
 * **Terraform**: `>= 1.5.7` (or OpenTofu)
 * **AWS Provider**: `>= 6.28.0`
 * **Python**: `Python 3.12` / `Python 3.14`
@@ -215,13 +301,17 @@ Versions follow [SemVer](https://semver.org) with `v`-prefixed tags. Before `1.0
 
 ---
 
-## 📌 Roadmap & Upcoming Features (TODO)
+## 📌 Roadmap
 
-Contributions and architectural enhancements are welcome for the following scheduled features:
+Contributions are welcome. Done and planned:
 
 - [x] **Edge Authentication Layer**: HTTP **Basic Authentication** at the edge, credentials in **AWS Secrets Manager** with in-memory caching.
 - [x] **Upstream Proxy**: Fallback to `pypi.org` (or any PEP 503 mirror) for packages not hosted locally.
 - [x] **Custom Domain**: CloudFront aliases with an ACM certificate and optional Route 53 alias records.
+- [x] **Hardened defaults**: security headers, HTTPS-only bucket, log retention, optional WAF and access logs.
+- [ ] **Dependency cooldown**: don't serve upstream versions published less than N days ago, with per-package exceptions.
+- [ ] **Integrity**: `#sha256=` hashes in index links, PEP 691 (JSON) and PEP 658 (metadata).
+- [ ] **Publishing**: a `publish` script or GitHub Action that uploads, normalizes names and invalidates the index.
 
 ---
 
@@ -268,6 +358,7 @@ Contributions and architectural enhancements are welcome for the following sched
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 | [aws_cloudfront_cache_policy.caching_optimized](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/cloudfront_cache_policy) | data source |
 | [aws_cloudfront_origin_request_policy.all_viewer_except_host](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/cloudfront_origin_request_policy) | data source |
+| [aws_cloudfront_response_headers_policy.security_headers](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/cloudfront_response_headers_policy) | data source |
 | [aws_iam_policy_document.lambda_edge_assume_role](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.s3_bucket](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/partition) | data source |
@@ -287,11 +378,16 @@ Contributions and architectural enhancements are welcome for the following sched
 | <a name="input_cloudfront_aliases"></a> [cloudfront\_aliases](#input\_cloudfront\_aliases) | Custom domain names (CNAMEs) for the index, e.g. ["pypi.example.com"]. Requires cloudfront\_acm\_certificate\_arn | `list(string)` | `[]` | no |
 | <a name="input_cloudfront_enabled"></a> [cloudfront\_enabled](#input\_cloudfront\_enabled) | Whether to create CloudFront distribution or not | `bool` | `true` | no |
 | <a name="input_cloudfront_http_version"></a> [cloudfront\_http\_version](#input\_cloudfront\_http\_version) | HTTP version for CloudFront distribution | `string` | `"http2"` | no |
+| <a name="input_cloudfront_logging_bucket"></a> [cloudfront\_logging\_bucket](#input\_cloudfront\_logging\_bucket) | Domain name of an S3 bucket for CloudFront standard access logs (e.g. "my-logs.s3.amazonaws.com"). The bucket must have ACLs enabled. When null, access logging is disabled | `string` | `null` | no |
+| <a name="input_cloudfront_logging_prefix"></a> [cloudfront\_logging\_prefix](#input\_cloudfront\_logging\_prefix) | Prefix for CloudFront access log objects | `string` | `"serverless-pypi-index/"` | no |
 | <a name="input_cloudfront_minimum_protocol_version"></a> [cloudfront\_minimum\_protocol\_version](#input\_cloudfront\_minimum\_protocol\_version) | Minimum TLS version for viewers. Only enforced with a custom certificate; the default *.cloudfront.net certificate always allows TLSv1 | `string` | `"TLSv1.2_2025"` | no |
 | <a name="input_cloudfront_price_class"></a> [cloudfront\_price\_class](#input\_cloudfront\_price\_class) | Price class for CloudFront distribution | `string` | `"PriceClass_100"` | no |
+| <a name="input_cloudfront_response_headers_policy_id"></a> [cloudfront\_response\_headers\_policy\_id](#input\_cloudfront\_response\_headers\_policy\_id) | ID of a CloudFront response headers policy for every behavior. When null, the managed SecurityHeadersPolicy (HSTS, X-Content-Type-Options, X-Frame-Options, ...) is used | `string` | `null` | no |
 | <a name="input_cloudfront_ttl_default"></a> [cloudfront\_ttl\_default](#input\_cloudfront\_ttl\_default) | Default TTL (seconds) for /simple/ index pages in CloudFront. Newly uploaded files show up in the index after at most this long | `number` | `300` | no |
 | <a name="input_cloudfront_ttl_max"></a> [cloudfront\_ttl\_max](#input\_cloudfront\_ttl\_max) | Maximum TTL (seconds) for /simple/ index pages in CloudFront | `number` | `3600` | no |
 | <a name="input_cloudfront_ttl_min"></a> [cloudfront\_ttl\_min](#input\_cloudfront\_ttl\_min) | Minimum TTL (seconds) for /simple/ index pages in CloudFront. Package files use the managed CachingOptimized policy | `number` | `0` | no |
+| <a name="input_cloudfront_web_acl_id"></a> [cloudfront\_web\_acl\_id](#input\_cloudfront\_web\_acl\_id) | ARN of a WAFv2 web ACL (scope CLOUDFRONT, in us-east-1) to associate with the distribution, e.g. for rate limiting or IP allow-lists | `string` | `null` | no |
+| <a name="input_log_retention_in_days"></a> [log\_retention\_in\_days](#input\_log\_retention\_in\_days) | Retention of the Lambda@Edge log group in us-east-1. Log groups that Lambda@Edge creates in other regions are not managed by this module | `number` | `30` | no |
 | <a name="input_name"></a> [name](#input\_name) | Name (prefix) of the resources created by this module. Must be unique per AWS account, so the module can be deployed more than once | `string` | `"serverless-pypi-index"` | no |
 | <a name="input_route53_zone_id"></a> [route53\_zone\_id](#input\_route53\_zone\_id) | ID of a Route 53 hosted zone in which to create A/AAAA alias records for every name in cloudfront\_aliases. When null, no DNS records are created | `string` | `null` | no |
 | <a name="input_s3_acceleration_status"></a> [s3\_acceleration\_status](#input\_s3\_acceleration\_status) | Acceleration status of the bucket | `string` | `"Suspended"` | no |
@@ -299,7 +395,7 @@ Contributions and architectural enhancements are welcome for the following sched
 | <a name="input_s3_admin_principal_arns"></a> [s3\_admin\_principal\_arns](#input\_s3\_admin\_principal\_arns) | IAM principal ARNs granted full access (s3:*) to the bucket via the bucket policy. Usually unnecessary for same-account identities, whose IAM policies already grant access | `list(string)` | `[]` | no |
 | <a name="input_s3_attach_deny_incorrect_encryption_headers"></a> [s3\_attach\_deny\_incorrect\_encryption\_headers](#input\_s3\_attach\_deny\_incorrect\_encryption\_headers) | Flag to attach deny incorrect encryption headers policy | `bool` | `false` | no |
 | <a name="input_s3_attach_deny_incorrect_kms_key_sse"></a> [s3\_attach\_deny\_incorrect\_kms\_key\_sse](#input\_s3\_attach\_deny\_incorrect\_kms\_key\_sse) | Flag to attach deny incorrect KMS key SSE policy | `bool` | `false` | no |
-| <a name="input_s3_attach_deny_insecure_transport_policy"></a> [s3\_attach\_deny\_insecure\_transport\_policy](#input\_s3\_attach\_deny\_insecure\_transport\_policy) | Flag to attach deny insecure transport policy | `bool` | `false` | no |
+| <a name="input_s3_attach_deny_insecure_transport_policy"></a> [s3\_attach\_deny\_insecure\_transport\_policy](#input\_s3\_attach\_deny\_insecure\_transport\_policy) | Flag to attach a bucket policy that denies requests not made over HTTPS | `bool` | `true` | no |
 | <a name="input_s3_attach_deny_ssec_encrypted_object_uploads"></a> [s3\_attach\_deny\_ssec\_encrypted\_object\_uploads](#input\_s3\_attach\_deny\_ssec\_encrypted\_object\_uploads) | Flag to attach deny SSEC encrypted object uploads policy | `bool` | `false` | no |
 | <a name="input_s3_attach_deny_unencrypted_object_uploads"></a> [s3\_attach\_deny\_unencrypted\_object\_uploads](#input\_s3\_attach\_deny\_unencrypted\_object\_uploads) | Flag to attach deny unencrypted object uploads policy | `bool` | `false` | no |
 | <a name="input_s3_attach_require_latest_tls_policy"></a> [s3\_attach\_require\_latest\_tls\_policy](#input\_s3\_attach\_require\_latest\_tls\_policy) | Flag to attach require latest TLS policy | `bool` | `false` | no |
@@ -332,6 +428,7 @@ Contributions and architectural enhancements are welcome for the following sched
 | <a name="output_s3_bucket_domain_name"></a> [s3\_bucket\_domain\_name](#output\_s3\_bucket\_domain\_name) | The regional domain name of the S3 bucket |
 | <a name="output_s3_bucket_id"></a> [s3\_bucket\_id](#output\_s3\_bucket\_id) | The name of the S3 bucket |
 | <a name="output_s3_bucket_policy"></a> [s3\_bucket\_policy](#output\_s3\_bucket\_policy) | The bucket policy JSON attached by this module (merged with the optional deny policies for a created bucket) |
+| <a name="output_uploader_policy_json"></a> [uploader\_policy\_json](#output\_uploader\_policy\_json) | IAM policy JSON for a CI identity that uploads packages and invalidates /simple/* (attach it to e.g. a GitHub Actions OIDC role) |
 <!-- END_TF_DOCS -->
 
 ---

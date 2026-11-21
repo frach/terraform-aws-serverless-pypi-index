@@ -31,6 +31,9 @@ build/
 # Crash log files
 crash.log
 
+# End-to-end test credentials (scripts/e2e.sh)
+.e2e-password
+
 # Lambda build artifacts
 builds/
 __pycache__/

@@ -20,6 +20,12 @@ data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
   name = "Managed-AllViewerExceptHostHeader"
 }
 
+data "aws_cloudfront_response_headers_policy" "security_headers" {
+  count = var.cloudfront_response_headers_policy_id == null ? 1 : 0
+
+  name = "Managed-SecurityHeadersPolicy"
+}
+
 # Existing bucket used when `s3_create_bucket` is false. It must live in the provider's region
 data "aws_s3_bucket" "existing" {
   count = var.s3_create_bucket ? 0 : 1
@@ -42,6 +48,8 @@ locals {
   s3_bucket_id                   = var.s3_create_bucket ? module.s3_bucket.s3_bucket_id : data.aws_s3_bucket.existing[0].id
   s3_bucket_arn                  = var.s3_create_bucket ? module.s3_bucket.s3_bucket_arn : data.aws_s3_bucket.existing[0].arn
   s3_bucket_regional_domain_name = var.s3_create_bucket ? module.s3_bucket.s3_bucket_bucket_regional_domain_name : data.aws_s3_bucket.existing[0].bucket_regional_domain_name
+
+  response_headers_policy_id = coalesce(var.cloudfront_response_headers_policy_id, try(data.aws_cloudfront_response_headers_policy.security_headers[0].id, null))
 
   # Viewer-request runs on every request (auth), origin-request on index cache misses (index generation & upstream routing)
   lambda_files_association = {
@@ -199,6 +207,14 @@ module "cloudfront" {
   continuous_deployment_policy_id = null
   create_monitoring_subscription  = false
 
+  web_acl_id = var.cloudfront_web_acl_id
+
+  logging_config = var.cloudfront_logging_bucket != null ? {
+    bucket          = var.cloudfront_logging_bucket
+    prefix          = var.cloudfront_logging_prefix
+    include_cookies = false
+  } : null
+
   # Access control
   origin_access_control = {
     s3_oac = {
@@ -226,8 +242,9 @@ module "cloudfront" {
     allowed_methods = ["GET", "HEAD", "OPTIONS"]
     cached_methods  = ["GET", "HEAD"]
 
-    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_optimized.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+    cache_policy_id            = data.aws_cloudfront_cache_policy.caching_optimized.id
+    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+    response_headers_policy_id = local.response_headers_policy_id
 
     # Lambda@Edge functions
     lambda_function_association = local.lambda_files_association
@@ -243,8 +260,9 @@ module "cloudfront" {
       allowed_methods = ["GET", "HEAD", "OPTIONS"]
       cached_methods  = ["GET", "HEAD"]
 
-      cache_policy_id          = aws_cloudfront_cache_policy.index.id
-      origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+      cache_policy_id            = aws_cloudfront_cache_policy.index.id
+      origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+      response_headers_policy_id = local.response_headers_policy_id
 
       lambda_function_association = local.lambda_index_association
     }
@@ -411,7 +429,8 @@ resource "aws_iam_role_policy" "lambda_edge" {
 resource "aws_cloudwatch_log_group" "lambda_edge" {
   region = "us-east-1"
 
-  name = "/aws/lambda/us-east-1.${local.lambda_function_name}"
+  name              = "/aws/lambda/us-east-1.${local.lambda_function_name}"
+  retention_in_days = var.log_retention_in_days
 
   tags = var.tags
 }
