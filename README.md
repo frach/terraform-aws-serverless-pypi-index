@@ -15,7 +15,7 @@ private names can't be hijacked from pypi.org, and every install goes through in
 
 ```hcl
 module "pypi" {
-  source = "git::https://github.com/frach/terraform-aws-serverless-pypi-index.git?ref=v0.1.0"
+  source = "git::https://github.com/frach/terraform-aws-serverless-pypi-index.git?ref=v0.2.0"
 
   auth_enabled     = true # Basic Auth, credentials in Secrets Manager
   upstream_enabled = true # serve everything else from pypi.org
@@ -115,7 +115,7 @@ provider "aws" {
 }
 
 module "pypi" {
-  source = "git::https://github.com/frach/terraform-aws-serverless-pypi-index.git?ref=v0.1.0"
+  source = "git::https://github.com/frach/terraform-aws-serverless-pypi-index.git?ref=v0.2.0"
 }
 ```
 
@@ -129,7 +129,7 @@ module "pypi" {
 
 ```hcl
 module "pypi" {
-  source = "git::https://github.com/frach/terraform-aws-serverless-pypi-index.git?ref=v0.1.0"
+  source = "git::https://github.com/frach/terraform-aws-serverless-pypi-index.git?ref=v0.2.0"
 
   cloudfront_aliases             = ["pypi.example.com"]
   cloudfront_acm_certificate_arn = aws_acm_certificate.pypi.arn # must be in us-east-1
@@ -148,7 +148,7 @@ module "pypi" {
 
 ```hcl
 module "pypi" {
-  source = "git::https://github.com/frach/terraform-aws-serverless-pypi-index.git?ref=v0.1.0"
+  source = "git::https://github.com/frach/terraform-aws-serverless-pypi-index.git?ref=v0.2.0"
 
   auth_enabled = true
   auth_credentials = {
@@ -174,7 +174,7 @@ module "pypi" {
 
 ```hcl
 module "pypi" {
-  source = "git::https://github.com/frach/terraform-aws-serverless-pypi-index.git?ref=v0.1.0"
+  source = "git::https://github.com/frach/terraform-aws-serverless-pypi-index.git?ref=v0.2.0"
 
   upstream_enabled   = true
   upstream_index_url = "https://pypi.org/simple" # or any HTTPS PEP 503 mirror
