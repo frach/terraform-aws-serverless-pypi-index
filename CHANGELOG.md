@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changes
+
+* Releases are `make release VERSION=x.y.z` and, after the merge, `make release-tag` (`scripts/release.sh`, CONTRIBUTING.md).
+
 ## [0.3.0] - 2026-11-23
 
 ### Features
