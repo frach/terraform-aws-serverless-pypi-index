@@ -118,6 +118,14 @@ e2e: ## Deploy to a real AWS account, test with curl + pip, destroy (needs AWS c
 e2e-destroy: ## Remove the e2e deployment (re-run hours later if Lambda@Edge replicas block it)
 	@scripts/e2e.sh down
 
+.PHONY: release
+release: ## Start a release VERSION=x.y.z: branch, CHANGELOG, README pin, commit, push (CONTRIBUTING.md)
+	@scripts/release.sh start $(VERSION)
+
+.PHONY: release-tag
+release-tag: ## After the release pull request is merged: tag main with its version (starts the Release workflow)
+	@scripts/release.sh tag
+
 .PHONY: docs
 docs: $(TFDOCS) ## Generate Terraform docs into README.md
 	@echo "==> Generating terraform-docs..."
