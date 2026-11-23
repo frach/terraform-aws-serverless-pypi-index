@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-23
+
 ### Features
 
 * Upstream cooldown: `upstream_cooldown_days` hides pypi.org files uploaded less than N days ago, so a compromised or typo-squatted release can't be installed the moment it's published. `upstream_cooldown_exclude` lists packages that skip it. With the cooldown on, the edge function builds the upstream page itself from PEP 691 JSON and adds `#sha256=` hashes, `data-requires-python`, yanked and metadata attributes.
@@ -11,6 +13,7 @@ All notable changes to this project will be documented in this file.
 ### Changes
 
 * Straighter arrows in the architecture diagram.
+* README examples use the Terraform Registry source `frach/serverless-pypi-index/aws`.
 * Shorter, plainer README. Tests, e2e and release steps moved to CONTRIBUTING.md, pre-v0.1.0 upgrade steps to docs/upgrading.md.
 
 ## [0.2.0] - 2026-11-21
@@ -80,6 +83,7 @@ First tagged release. **BREAKING** items refer to changes since the untagged pre
 * The Lambda package is built with `archive_file` (index.py + generated config.json in memory) on plain `aws_lambda_function`/IAM resources, instead of `local_file` writing into the module directory. See the README for `terraform state mv` upgrade commands.
 * Minimum Terraform version lowered to `1.5.7` (the floor of the wrapped terraform-aws-modules; also OpenTofu compatible). Minimum AWS provider raised to `6.28.0` to match those modules.
 
-[Unreleased]: https://github.com/frach/terraform-aws-serverless-pypi-index/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/frach/terraform-aws-serverless-pypi-index/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/frach/terraform-aws-serverless-pypi-index/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/frach/terraform-aws-serverless-pypi-index/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/frach/terraform-aws-serverless-pypi-index/releases/tag/v0.1.0

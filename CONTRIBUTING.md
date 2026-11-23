@@ -60,7 +60,7 @@ Versions follow [SemVer](https://semver.org) with `v`-prefixed tags; before `1.0
 
 1. On a `release/vX.Y.Z` branch, rename `## [Unreleased]` in `CHANGELOG.md` to `## [X.Y.Z] - YYYY-MM-DD`, add a fresh
    `## [Unreleased]` above it, and update the compare links at the bottom.
-2. Bump `?ref=` in the README snippets, open a PR and merge it once CI is green.
+2. On a new minor version, bump `version = "~> X.Y"` in the README snippets. Open a PR and merge it once CI is green.
 3. Tag the merge commit and push the tag: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
 4. The `Release` workflow publishes a GitHub Release with that version's `CHANGELOG.md` section as its notes. The Terraform
    Registry picks up the new tag automatically.
