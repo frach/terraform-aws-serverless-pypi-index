@@ -34,6 +34,8 @@ module "pypi" {
   auth_enabled                        = true
   auth_secret_recovery_window_in_days = 0
   upstream_enabled                    = true
+  upstream_cooldown_days              = 7
+  upstream_cooldown_exclude           = ["six"]
 
   # Short index TTL so a re-run sees fresh uploads
   cloudfront_ttl_default = 5

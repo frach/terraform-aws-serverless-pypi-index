@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+
+* Upstream cooldown: `upstream_cooldown_days` hides pypi.org files uploaded less than N days ago, so a compromised or typo-squatted release can't be installed the moment it's published. `upstream_cooldown_exclude` lists packages that skip it. With the cooldown on, the edge function builds the upstream page itself from PEP 691 JSON and adds `#sha256=` hashes, `data-requires-python`, yanked and metadata attributes.
+
+### Changes
+
+* Straighter arrows in the architecture diagram.
+
 ## [0.2.0] - 2026-11-21
 
 ### Features

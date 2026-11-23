@@ -1,6 +1,9 @@
 import sys
 import os
 import base64
+import gzip
+import urllib.error
+from datetime import datetime, timedelta, timezone
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -64,6 +67,8 @@ def setup_test_environment():
     index.AUTH_SECRET_ID = "serverless-pypi-index-credentials"
     index.UPSTREAM_ENABLED = False
     index.UPSTREAM_INDEX_URL = "https://pypi.org/simple"
+    index.UPSTREAM_COOLDOWN_DAYS = 0
+    index.UPSTREAM_COOLDOWN_EXCLUDE = set()
     index._credentials_cache.update({"value": None, "expires_at": 0.0})
     yield
 
@@ -297,3 +302,131 @@ def test_s3_errors_are_not_leaked(mock_s3, setup_test_environment):
 
     assert response["status"] == "500"
     assert "AccessDenied" not in response["body"]
+
+
+# --------------------------#
+#         COOLDOWN          #
+# --------------------------#
+def upstream_project(files):
+    return {"name": "numpy", "files": files}
+
+
+def upstream_file(filename, uploaded, **extra):
+    entry = {
+        "filename": filename,
+        "url": f"https://files.pythonhosted.org/packages/xx/{filename}",
+        "hashes": {"sha256": "ab" * 32},
+        "upload-time": uploaded,
+    }
+    entry.update(extra)
+    return entry
+
+
+def old_and_new_files():
+    now = datetime.now(timezone.utc)
+    old = (now - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    new = (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    return [
+        upstream_file(
+            "numpy-2.0.0-py3-none-any.whl", old, **{"requires-python": ">=3.8"}
+        ),
+        upstream_file("numpy-2.1.0-py3-none-any.whl", new),
+    ]
+
+
+@patch("index.fetch_upstream_project")
+@patch("index.s3_client")
+def test_cooldown_hides_recent_upstream_files(
+    mock_s3, mock_fetch, setup_test_environment
+):
+    """Verify files younger than the cooldown are left out of the generated upstream page."""
+    index.UPSTREAM_ENABLED = True
+    index.UPSTREAM_COOLDOWN_DAYS = 7
+    mock_listing(mock_s3)
+    mock_fetch.return_value = upstream_project(old_and_new_files())
+
+    response = handler(create_cloudfront_event("/simple/numpy/"), None)
+
+    assert response["status"] == "200"
+    body = response["body"]
+    assert "numpy-2.0.0-py3-none-any.whl#sha256=" + "ab" * 32 in body
+    assert 'data-requires-python="&gt;=3.8"' in body
+    assert "numpy-2.1.0" not in body
+
+
+@patch("index.fetch_upstream_project")
+@patch("index.s3_client")
+def test_cooldown_response_is_gzipped_when_accepted(
+    mock_s3, mock_fetch, setup_test_environment
+):
+    """Verify large upstream pages can be returned gzip-compressed to stay under the 1 MB limit."""
+    index.UPSTREAM_ENABLED = True
+    index.UPSTREAM_COOLDOWN_DAYS = 7
+    mock_listing(mock_s3)
+    mock_fetch.return_value = upstream_project(old_and_new_files())
+    headers = {"accept-encoding": [{"key": "Accept-Encoding", "value": "gzip"}]}
+
+    response = handler(create_cloudfront_event("/simple/numpy/", headers=headers), None)
+
+    assert response["bodyEncoding"] == "base64"
+    assert response["headers"]["content-encoding"][0]["value"] == "gzip"
+    body = gzip.decompress(base64.b64decode(response["body"])).decode()
+    assert "numpy-2.0.0" in body and "numpy-2.1.0" not in body
+
+
+@patch("index.fetch_upstream_project")
+@patch("index.s3_client")
+def test_cooldown_exclude_routes_to_upstream_directly(
+    mock_s3, mock_fetch, setup_test_environment
+):
+    """Verify excluded packages skip the cooldown and are proxied unchanged."""
+    index.UPSTREAM_ENABLED = True
+    index.UPSTREAM_COOLDOWN_DAYS = 7
+    index.UPSTREAM_COOLDOWN_EXCLUDE = {"numpy"}
+    mock_listing(mock_s3)
+
+    response = handler(create_cloudfront_event("/simple/NumPy/"), None)
+
+    mock_fetch.assert_not_called()
+    assert response["origin"]["custom"]["domainName"] == "pypi.org"
+
+
+@patch("index.fetch_upstream_project")
+@patch("index.s3_client")
+def test_cooldown_does_not_affect_local_packages(
+    mock_s3, mock_fetch, setup_test_environment
+):
+    """Verify packages hosted in S3 are served as before, without any upstream call."""
+    index.UPSTREAM_ENABLED = True
+    index.UPSTREAM_COOLDOWN_DAYS = 7
+    mock_listing(mock_s3)
+
+    response = handler(create_cloudfront_event("/simple/six/"), None)
+
+    mock_fetch.assert_not_called()
+    assert "six-1.17.0-py2.py3-none-any.whl" in response["body"]
+
+
+@patch("index.fetch_upstream_project")
+@patch("index.s3_client")
+def test_cooldown_upstream_404_and_errors(mock_s3, mock_fetch, setup_test_environment):
+    """Verify unknown upstream packages give 404 and other upstream failures a generic 502."""
+    index.UPSTREAM_ENABLED = True
+    index.UPSTREAM_COOLDOWN_DAYS = 7
+    mock_listing(mock_s3)
+
+    mock_fetch.side_effect = urllib.error.HTTPError("u", 404, "Not Found", {}, None)
+    assert handler(create_cloudfront_event("/simple/nope/"), None)["status"] == "404"
+
+    mock_fetch.side_effect = TimeoutError("upstream slow")
+    response = handler(create_cloudfront_event("/simple/nope/"), None)
+    assert response["status"] == "502"
+    assert "slow" not in response["body"]
+
+
+def test_cooldown_drops_files_without_upload_time(setup_test_environment):
+    """Verify files whose age can't be checked are treated as too new."""
+    index.UPSTREAM_COOLDOWN_DAYS = 7
+    files = [{"filename": "x.whl", "url": "https://example.com/x.whl"}]
+
+    assert index.filter_cooldown(files, datetime.now(timezone.utc)) == []

@@ -171,6 +171,23 @@ variable "upstream_index_url" {
   }
 }
 
+variable "upstream_cooldown_days" {
+  description = "Hide upstream files uploaded less than this many days ago, so a freshly published (possibly malicious) release can't be installed until it has been public for a while. 0 disables the cooldown. Requires an upstream that serves PEP 691 JSON with PEP 700 upload times (pypi.org does)"
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.upstream_cooldown_days >= 0 && floor(var.upstream_cooldown_days) == var.upstream_cooldown_days
+    error_message = "upstream_cooldown_days must be a whole number of days, 0 or more."
+  }
+}
+
+variable "upstream_cooldown_exclude" {
+  description = "Upstream package names that skip the cooldown, e.g. your own public packages or ones you need to patch quickly. Names are compared after PEP 503 normalization"
+  type        = list(string)
+  default     = []
+}
+
 
 # S3 variables
 variable "s3_create_bucket" {
