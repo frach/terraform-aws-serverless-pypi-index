@@ -26,7 +26,8 @@ provider "aws" {
 }
 
 module "pypi" {
-  source = "git::https://github.com/frach/terraform-aws-serverless-pypi-index.git?ref=v0.3.0"
+  source  = "frach/serverless-pypi-index/aws"
+  version = "~> 0.3"
 
   auth_enabled     = true
   upstream_enabled = true
@@ -74,7 +75,8 @@ auth, Lambda@Edge only runs on index cache misses and no secret is created.
 
 ```hcl
 module "pypi" {
-  source = "git::https://github.com/frach/terraform-aws-serverless-pypi-index.git?ref=v0.3.0"
+  source  = "frach/serverless-pypi-index/aws"
+  version = "~> 0.3"
 
   cloudfront_aliases             = ["pypi.example.com"]
   cloudfront_acm_certificate_arn = aws_acm_certificate.pypi.arn # must be in us-east-1
@@ -91,7 +93,8 @@ module "pypi" {
 
 ```hcl
 module "pypi" {
-  source = "git::https://github.com/frach/terraform-aws-serverless-pypi-index.git?ref=v0.3.0"
+  source  = "frach/serverless-pypi-index/aws"
+  version = "~> 0.3"
 
   auth_enabled = true
   auth_credentials = {
@@ -111,7 +114,8 @@ module "pypi" {
 
 ```hcl
 module "pypi" {
-  source = "git::https://github.com/frach/terraform-aws-serverless-pypi-index.git?ref=v0.3.0"
+  source  = "frach/serverless-pypi-index/aws"
+  version = "~> 0.3"
 
   upstream_enabled          = true
   upstream_index_url        = "https://pypi.org/simple" # default
