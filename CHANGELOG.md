@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Changes
 
 * Straighter arrows in the architecture diagram.
+* Shorter, plainer README. Tests, e2e and release steps moved to CONTRIBUTING.md, pre-v0.1.0 upgrade steps to docs/upgrading.md.
 
 ## [0.2.0] - 2026-11-21
 
