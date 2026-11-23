@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# The release steps that are the same every time (CONTRIBUTING.md, "Releases"),
-# with the same commands as the apps (edomia-app, coldwheel-app, dailyquest-app):
+# Release steps (CONTRIBUTING.md, "Releases"):
 #   scripts/release.sh start <version>   (make release VERSION=<version>)
 #     from main or from release/v<version>: the branch, the version's section and
 #     compare links in CHANGELOG.md, "~> X.Y" in the README, a commit, the push,

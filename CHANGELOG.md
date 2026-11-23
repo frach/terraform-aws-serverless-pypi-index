@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changes
 
-* Releases are `make release VERSION=x.y.z` and, after the merge, `make release-tag` (`scripts/release.sh`, CONTRIBUTING.md), the same commands as in the project's apps.
+* Releases are `make release VERSION=x.y.z` and, after the merge, `make release-tag` (`scripts/release.sh`, CONTRIBUTING.md).
 
 ## [0.3.0] - 2026-11-23
 

@@ -58,7 +58,7 @@ function. Finish it later with `make e2e-destroy`.
 
 Versions follow [SemVer](https://semver.org) with `v`-prefixed tags; before `1.0.0`, breaking changes bump the minor version.
 
-Two commands, the same as in the other repositories of the project. First list everything that goes out under
+Two commands. First list everything that goes out under
 `## [Unreleased]` in `CHANGELOG.md` on `main`.
 
 1. `make release VERSION=X.Y.Z` on `main`: makes the `release/vX.Y.Z` branch, turns `## [Unreleased]` into
