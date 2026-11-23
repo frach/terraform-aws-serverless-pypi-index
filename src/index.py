@@ -3,7 +3,11 @@ import json
 import re
 import time
 import base64
+import gzip
 import hmac
+import urllib.error
+import urllib.request
+from datetime import datetime, timedelta, timezone
 from html import escape
 from urllib.parse import quote, urlparse
 
@@ -33,6 +37,13 @@ AUTH_CACHE_TTL = CONFIG.get("auth_cache_ttl", 300)
 # Upstream proxy settings
 UPSTREAM_ENABLED = CONFIG.get("upstream_enabled", False)
 UPSTREAM_INDEX_URL = CONFIG.get("upstream_index_url", "https://pypi.org/simple")
+
+# Cooldown: upstream files uploaded less than this many days ago are hidden (0 = off)
+UPSTREAM_COOLDOWN_DAYS = CONFIG.get("upstream_cooldown_days", 0)
+UPSTREAM_COOLDOWN_EXCLUDE = set(CONFIG.get("upstream_cooldown_exclude", []))
+
+# Lambda@Edge rejects generated origin-request responses over 1 MB
+MAX_RESPONSE_BYTES = 1_000_000
 
 s3_client = boto3.client("s3", region_name=DATA_LAYER_REGION)
 secrets_client = boto3.client("secretsmanager", region_name=DATA_LAYER_REGION)
@@ -267,6 +278,127 @@ def route_to_upstream(request, package_name: str):
     return request
 
 
+# --------------------------#
+#         COOLDOWN          #
+# --------------------------#
+def fetch_upstream_project(package_name: str) -> dict:
+    """Fetch a project's PEP 691 JSON page (with PEP 700 upload times) from the upstream index."""
+    url = f"{UPSTREAM_INDEX_URL.rstrip('/')}/{normalize_name(package_name)}/"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.pypi.simple.v1+json",
+            "Accept-Encoding": "gzip",
+            "User-Agent": "serverless-pypi-index",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=3) as resp:
+        raw = resp.read()
+        if resp.headers.get("Content-Encoding") == "gzip":
+            raw = gzip.decompress(raw)
+        content_type = resp.headers.get("Content-Type", "")
+
+    if "json" not in content_type:
+        raise ValueError(f"upstream doesn't serve PEP 691 JSON ({content_type})")
+    return json.loads(raw)
+
+
+def parse_upload_time(value: str) -> datetime:
+    # PEP 700: ISO 8601 in UTC, e.g. 2024-01-02T03:04:05.678901Z
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def filter_cooldown(files: list, now: datetime) -> list:
+    """Drop files uploaded within the cooldown window. Files without an upload time are dropped too."""
+    cutoff = now - timedelta(days=UPSTREAM_COOLDOWN_DAYS)
+    kept = []
+    for f in files:
+        uploaded = f.get("upload-time")
+        if uploaded and parse_upload_time(uploaded) <= cutoff:
+            kept.append(f)
+    return kept
+
+
+def generate_upstream_html(project: str, files: list) -> str:
+    """Render PEP 503 HTML (with PEP 592/658 attributes) from PEP 691 file entries."""
+    links = ""
+    for f in files:
+        href = f["url"]
+        sha256 = f.get("hashes", {}).get("sha256")
+        if sha256:
+            href += f"#sha256={sha256}"
+
+        attrs = f' href="{escape(href)}"'
+        if f.get("requires-python"):
+            attrs += f' data-requires-python="{escape(f["requires-python"])}"'
+        yanked = f.get("yanked")
+        if yanked:
+            attrs += (
+                f' data-yanked="{escape(yanked)}"'
+                if isinstance(yanked, str)
+                else ' data-yanked=""'
+            )
+        metadata = f.get("core-metadata", f.get("dist-info-metadata"))
+        if isinstance(metadata, dict) and metadata.get("sha256"):
+            value = f"sha256={metadata['sha256']}"
+            attrs += f' data-core-metadata="{value}" data-dist-info-metadata="{value}"'
+        elif metadata is True:
+            attrs += ' data-core-metadata="true" data-dist-info-metadata="true"'
+
+        links += f'    <a{attrs}>{escape(f["filename"])}</a><br/>\n'
+
+    title = escape(project)
+    return f"""<!DOCTYPE html>
+<html>
+  <head>
+    <title>Links for {title}</title>
+  </head>
+  <body>
+    <h1>Links for {title}</h1>
+{links}
+  </body>
+</html>"""
+
+
+def accepts_gzip(request) -> bool:
+    values = request.get("headers", {}).get("accept-encoding", [])
+    return any("gzip" in v.get("value", "") for v in values)
+
+
+def upstream_cooldown_response(request, package_name: str) -> dict:
+    try:
+        project = fetch_upstream_project(package_name)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return html_response(
+                "404", "Not Found", f"Package {escape(package_name)} not found"
+            )
+        print(f"Upstream returned {e.code} for {package_name!r}")
+        return html_response("502", "Bad Gateway", "Bad Gateway")
+    except Exception as e:
+        print(f"Upstream fetch failed for {package_name!r}: {e!r}")
+        return html_response("502", "Bad Gateway", "Bad Gateway")
+
+    files = filter_cooldown(project.get("files", []), datetime.now(timezone.utc))
+    body = generate_upstream_html(project.get("name", package_name), files)
+
+    # Big projects (thousands of files) exceed the 1 MB limit as plain HTML, but compress ~10x
+    if accepts_gzip(request):
+        response = html_response("200", "OK", "")
+        response["headers"]["content-encoding"] = [
+            {"key": "Content-Encoding", "value": "gzip"}
+        ]
+        response["body"] = base64.b64encode(gzip.compress(body.encode())).decode()
+        response["bodyEncoding"] = "base64"
+    else:
+        response = html_response("200", "OK", body)
+
+    if len(response["body"]) > MAX_RESPONSE_BYTES:
+        print(f"Cooldown page for {package_name!r} exceeds the Lambda@Edge size limit")
+        return html_response("502", "Bad Gateway", "Bad Gateway")
+    return response
+
+
 # Origin-request: runs on cache misses only; generated responses are cached by CloudFront.
 def handle_origin_request(request):
     uri = request["uri"].strip("/")
@@ -303,6 +435,11 @@ def handle_origin_request(request):
         return html_response("200", "OK", generate_package_html(package_name, objects))
 
     if UPSTREAM_ENABLED:
+        if (
+            UPSTREAM_COOLDOWN_DAYS > 0
+            and normalize_name(package_name) not in UPSTREAM_COOLDOWN_EXCLUDE
+        ):
+            return upstream_cooldown_response(request, package_name)
         return route_to_upstream(request, package_name)
 
     return html_response(

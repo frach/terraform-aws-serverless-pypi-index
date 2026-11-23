@@ -186,6 +186,30 @@ module "pypi" {
 * Upstream pages are cached in CloudFront like local index pages, according to the `cloudfront_ttl_*` settings.
 * Package files of upstream projects are downloaded straight from `files.pythonhosted.org`. pip doesn't send your index credentials there.
 
+### Cooldown for new upstream releases
+
+Most malicious packages and compromised releases are found and removed from PyPI within days. A cooldown keeps them out of your
+builds until then: upstream files uploaded less than `upstream_cooldown_days` ago are simply not listed, so pip, uv and Poetry
+resolve to the previous release.
+
+```hcl
+module "pypi" {
+  source = "git::https://github.com/frach/terraform-aws-serverless-pypi-index.git?ref=v0.3.0"
+
+  upstream_enabled          = true
+  upstream_cooldown_days    = 7
+  upstream_cooldown_exclude = ["my-public-lib"] # packages you trust or must patch the same day
+}
+```
+
+* Your own packages in S3 are never affected.
+* With the cooldown on, the edge function builds the upstream page itself from the PEP 691 JSON API, so the upstream must
+  support PEP 691 and PEP 700 upload times (pypi.org does). Files without an upload time are hidden. The generated pages also
+  carry `#sha256=` hashes, `data-requires-python` and yanked/metadata attributes.
+* Pages are sent gzip-compressed to stay under the 1 MB Lambda@Edge response limit (`botocore`, one of the largest projects,
+  is about 0.75 MB compressed). pip, uv and Poetry all accept gzip.
+* Changing the cooldown takes effect after the index pages' cache TTL (`cloudfront_ttl_default`) or an invalidation of `/simple/*`.
+
 ---
 
 ## 📦 Python Ecosystem Client Integration
@@ -411,6 +435,8 @@ Contributions are welcome. Done and planned:
 | <a name="input_s3_restrict_public_buckets"></a> [s3\_restrict\_public\_buckets](#input\_s3\_restrict\_public\_buckets) | Flag to restrict public buckets | `bool` | `true` | no |
 | <a name="input_s3_versioning"></a> [s3\_versioning](#input\_s3\_versioning) | Versioning configuration for the bucket | <pre>object({<br/>    status     = bool<br/>    mfa_delete = bool<br/>  })</pre> | <pre>{<br/>  "mfa_delete": false,<br/>  "status": true<br/>}</pre> | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | Tags added to every resource that supports them | `map(string)` | `{}` | no |
+| <a name="input_upstream_cooldown_days"></a> [upstream\_cooldown\_days](#input\_upstream\_cooldown\_days) | Hide upstream files uploaded less than this many days ago, so a freshly published (possibly malicious) release can't be installed until it has been public for a while. 0 disables the cooldown. Requires an upstream that serves PEP 691 JSON with PEP 700 upload times (pypi.org does) | `number` | `0` | no |
+| <a name="input_upstream_cooldown_exclude"></a> [upstream\_cooldown\_exclude](#input\_upstream\_cooldown\_exclude) | Upstream package names that skip the cooldown, e.g. your own public packages or ones you need to patch quickly. Names are compared after PEP 503 normalization | `list(string)` | `[]` | no |
 | <a name="input_upstream_enabled"></a> [upstream\_enabled](#input\_upstream\_enabled) | Whether to proxy /simple/<package>/ requests to the upstream index when the package is not hosted in the S3 bucket. Locally hosted packages always take precedence | `bool` | `false` | no |
 | <a name="input_upstream_index_url"></a> [upstream\_index\_url](#input\_upstream\_index\_url) | HTTPS URL of the upstream PEP 503 simple index (e.g. https://pypi.org/simple) | `string` | `"https://pypi.org/simple"` | no |
 

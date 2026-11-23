@@ -379,6 +379,9 @@ data "archive_file" "lambda" {
       auth_cache_ttl     = var.auth_cache_ttl
       upstream_enabled   = var.upstream_enabled
       upstream_index_url = var.upstream_index_url
+
+      upstream_cooldown_days    = var.upstream_cooldown_days
+      upstream_cooldown_exclude = [for name in var.upstream_cooldown_exclude : replace(lower(name), "/[-_.]+/", "-")]
     })
   }
 }

@@ -207,3 +207,14 @@ run "custom_response_headers_policy" {
     error_message = "A custom response headers policy must replace the managed one."
   }
 }
+
+run "cooldown_must_be_whole_days" {
+  command = plan
+
+  variables {
+    upstream_enabled       = true
+    upstream_cooldown_days = 1.5
+  }
+
+  expect_failures = [var.upstream_cooldown_days]
+}
