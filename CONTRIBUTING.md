@@ -17,7 +17,7 @@ make check       # pre-commit (fmt, docs, tflint, validate, black), terraform te
 | `make test` | Lambda unit tests (pytest) |
 | `make tf-test` | Terraform unit tests with mocked providers, no AWS account needed |
 | `make pre-commit` | Formatting, linting, `terraform validate`, regenerated docs |
-| `make e2e` | Deploys to a real AWS account and tests with curl and pip (see the README) |
+| `make e2e` | Deploys to a real AWS account and tests with curl and pip (see below) |
 
 ## Making a change
 
@@ -33,6 +33,19 @@ make check       # pre-commit (fmt, docs, tflint, validate, black), terraform te
 If you change anything users can see at runtime (CloudFront behaviours, Lambda@Edge, IAM, the bucket policy), please also run
 `make e2e` against a sandbox account and mention the result in the pull request.
 
+## End-to-end test
+
+`make e2e` deploys the module from your checkout to a sandbox AWS account, publishes a small package and checks auth, the
+PEP 503 pages, downloads, the cooldown, security headers, `pip install` and the pypi.org fallback, then tears everything down
+(a few cents, 15-20 minutes):
+
+```bash
+AWS_PROFILE=sandbox AWS_REGION=eu-central-1 make e2e
+```
+
+Lambda@Edge functions can only be deleted a few hours after their CloudFront distribution, so the teardown may stop at the
+function. Finish it later with `make e2e-destroy`.
+
 ## Style
 
 - Terraform: `terraform fmt`, every variable and output has a `description`, inputs are validated where a wrong value would
@@ -43,8 +56,14 @@ If you change anything users can see at runtime (CloudFront behaviours, Lambda@E
 
 ## Releases
 
-Maintainers release from `main` as described in the README ("Releasing"). Versions follow [SemVer](https://semver.org);
-before `1.0.0`, breaking changes bump the minor version.
+Versions follow [SemVer](https://semver.org) with `v`-prefixed tags; before `1.0.0`, breaking changes bump the minor version.
+
+1. On a `release/vX.Y.Z` branch, rename `## [Unreleased]` in `CHANGELOG.md` to `## [X.Y.Z] - YYYY-MM-DD`, add a fresh
+   `## [Unreleased]` above it, and update the compare links at the bottom.
+2. Bump `?ref=` in the README snippets, open a PR and merge it once CI is green.
+3. Tag the merge commit and push the tag: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
+4. The `Release` workflow publishes a GitHub Release with that version's `CHANGELOG.md` section as its notes. The Terraform
+   Registry picks up the new tag automatically.
 
 By contributing you agree that your contributions are licensed under the [Apache 2.0 License](LICENSE) and that you follow
 the [Code of Conduct](CODE_OF_CONDUCT.md).
