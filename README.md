@@ -15,6 +15,8 @@ always-on compute.
 - Optional fallback to pypi.org (or another PEP 503 index) for packages that aren't in the bucket. A package with any file in
   the bucket is always served from the bucket, so a public package can't take over a private name.
 - Optional cooldown that hides upstream files published less than N days ago.
+- Optional uploads with `twine upload`, `uv publish` and `poetry publish`, with their own credentials. Published files can't
+  be overwritten.
 - Custom domain with ACM and Route 53, security response headers, optional WAF and access logs.
 - Private, HTTPS-only bucket read through Origin Access Control. Works with an existing bucket.
 
@@ -63,7 +65,7 @@ once in an account. `tags` are added to every resource that supports them.
 | Client auth | Static Basic Auth (`.netrc`, keyring, `pip.conf`) | IAM token valid for at most 12 h |
 | AWS credentials on clients | Not needed | Needed on every laptop and CI job |
 | Fallback to pypi.org | Yes, local packages take precedence | Yes, upstream repository |
-| Upload | `aws s3 cp` | `twine upload` |
+| Upload | `twine upload`, `uv publish`, `poetry publish` or `aws s3 cp` | `twine upload` |
 
 ## Cost
 
@@ -167,7 +169,38 @@ poetry config http-basic.private <user> <password>
 
 ## Uploading packages
 
-Upload files under the PEP 503 normalized project name (lowercase, runs of `-`, `_` and `.` replaced with `-`):
+With `upload_enabled = true`, the index accepts uploads at the `upload_url` output (`https://<index host>/upload/`):
+
+```hcl
+module "pypi" {
+  source  = "frach/serverless-pypi-index/aws"
+  version = "~> 0.4"
+
+  upload_enabled = true
+  # Or leave it empty and put {"<user>": "<password>"} into the upload_secret_name secret yourself
+  upload_credentials = { ci = var.upload_password }
+}
+```
+
+```bash
+twine upload --repository-url https://pypi.example.com/upload/ -u ci -p "$PASSWORD" dist/*
+uv publish --publish-url https://pypi.example.com/upload/ -u ci -p "$PASSWORD"
+poetry config repositories.private https://pypi.example.com/upload/
+poetry publish -r private -u ci -p "$PASSWORD"
+```
+
+- Upload credentials are separate from the read credentials (`auth_credentials`), so pip users can't publish.
+  `/upload/` doesn't ask for the read credentials.
+- An existing file is never overwritten: a different file with the same name gets `409 File already exists`. Uploading the
+  identical file again succeeds, so a re-run publish job doesn't fail.
+- The file name must belong to the uploaded project, and the `sha256_digest`/`md5_digest` sent by the client must match.
+- After an upload the function invalidates `/simple/` and the project's page, so the new file is listed right away.
+- A request can't exceed the Lambda payload limit of 6 MB, which leaves about 4 MB per file. Upload bigger files with
+  `aws s3 cp` as below.
+- A WAF rule that limits request body size (e.g. `SizeRestrictions_BODY` in the AWS common rule set) blocks uploads
+  unless `/upload/` is excluded from it.
+
+Without `upload_enabled`, or for bigger files, upload files under the PEP 503 normalized project name (lowercase, runs of `-`, `_` and `.` replaced with `-`):
 
 ```bash
 aws s3 cp dist/my_package-1.0.0-py3-none-any.whl "s3://$(terraform output -raw s3_bucket_id)/my-package/"
@@ -216,16 +249,28 @@ Contributing, tests and releases: see [CONTRIBUTING.md](CONTRIBUTING.md).
 | ---- | ---- |
 | [aws_cloudfront_cache_policy.index](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudfront_cache_policy) | resource |
 | [aws_cloudwatch_log_group.lambda_edge](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
+| [aws_cloudwatch_log_group.upload](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_log_group) | resource |
 | [aws_iam_role.lambda_edge](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role.upload](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role_policy.lambda_edge](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
 | [aws_iam_role_policy.lambda_edge_logs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_iam_role_policy.upload](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
 | [aws_lambda_function.edge](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function) | resource |
+| [aws_lambda_function.upload](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function) | resource |
+| [aws_lambda_function_url.upload](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_function_url) | resource |
+| [aws_lambda_permission.upload_invoke](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_permission) | resource |
+| [aws_lambda_permission.upload_url](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_permission) | resource |
 | [aws_route53_record.alias](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
 | [aws_s3_bucket_policy.s3_bucket_policy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_policy) | resource |
 | [aws_secretsmanager_secret.auth](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret) | resource |
+| [aws_secretsmanager_secret.upload](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret) | resource |
 | [aws_secretsmanager_secret_version.auth](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
+| [aws_secretsmanager_secret_version.upload](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/secretsmanager_secret_version) | resource |
+| [aws_ssm_parameter.upload_distribution_id](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ssm_parameter) | resource |
 | [archive_file.lambda](https://registry.terraform.io/providers/hashicorp/archive/latest/docs/data-sources/file) | data source |
+| [archive_file.upload](https://registry.terraform.io/providers/hashicorp/archive/latest/docs/data-sources/file) | data source |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
+| [aws_cloudfront_cache_policy.caching_disabled](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/cloudfront_cache_policy) | data source |
 | [aws_cloudfront_cache_policy.caching_optimized](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/cloudfront_cache_policy) | data source |
 | [aws_cloudfront_origin_request_policy.all_viewer_except_host](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/cloudfront_origin_request_policy) | data source |
 | [aws_cloudfront_response_headers_policy.security_headers](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/cloudfront_response_headers_policy) | data source |
@@ -239,11 +284,11 @@ Contributing, tests and releases: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
-| <a name="input_auth_cache_ttl"></a> [auth\_cache\_ttl](#input\_auth\_cache\_ttl) | Number of seconds the Lambda@Edge function caches credentials in memory before re-reading the secret. Credential changes take up to this long to propagate | `number` | `300` | no |
+| <a name="input_auth_cache_ttl"></a> [auth\_cache\_ttl](#input\_auth\_cache\_ttl) | Number of seconds the Lambda functions cache credentials (read and upload) in memory before re-reading the secret. Credential changes take up to this long to propagate | `number` | `300` | no |
 | <a name="input_auth_credentials"></a> [auth\_credentials](#input\_auth\_credentials) | Map of username => password stored in the Secrets Manager secret. Values end up in Terraform state; leave empty to populate the secret out-of-band as a JSON object of username/password pairs | `map(string)` | `{}` | no |
 | <a name="input_auth_enabled"></a> [auth\_enabled](#input\_auth\_enabled) | Whether to protect the whole index (including package downloads) with HTTP Basic Authentication backed by AWS Secrets Manager | `bool` | `false` | no |
 | <a name="input_auth_realm"></a> [auth\_realm](#input\_auth\_realm) | Realm advertised in the WWW-Authenticate challenge | `string` | `"Private PyPI"` | no |
-| <a name="input_auth_secret_recovery_window_in_days"></a> [auth\_secret\_recovery\_window\_in\_days](#input\_auth\_secret\_recovery\_window\_in\_days) | Number of days Secrets Manager waits before deleting the credentials secret. 0 forces immediate deletion | `number` | `7` | no |
+| <a name="input_auth_secret_recovery_window_in_days"></a> [auth\_secret\_recovery\_window\_in\_days](#input\_auth\_secret\_recovery\_window\_in\_days) | Number of days Secrets Manager waits before deleting a credentials secret (read or upload). 0 forces immediate deletion | `number` | `7` | no |
 | <a name="input_cloudfront_acm_certificate_arn"></a> [cloudfront\_acm\_certificate\_arn](#input\_cloudfront\_acm\_certificate\_arn) | ARN of an ACM certificate in us-east-1 covering every name in cloudfront\_aliases. When null, the default *.cloudfront.net certificate is used | `string` | `null` | no |
 | <a name="input_cloudfront_aliases"></a> [cloudfront\_aliases](#input\_cloudfront\_aliases) | Custom domain names (CNAMEs) for the index, e.g. ["pypi.example.com"]. Requires cloudfront\_acm\_certificate\_arn | `list(string)` | `[]` | no |
 | <a name="input_cloudfront_enabled"></a> [cloudfront\_enabled](#input\_cloudfront\_enabled) | Whether to create CloudFront distribution or not | `bool` | `true` | no |
@@ -281,6 +326,8 @@ Contributing, tests and releases: see [CONTRIBUTING.md](CONTRIBUTING.md).
 | <a name="input_s3_restrict_public_buckets"></a> [s3\_restrict\_public\_buckets](#input\_s3\_restrict\_public\_buckets) | Flag to restrict public buckets | `bool` | `true` | no |
 | <a name="input_s3_versioning"></a> [s3\_versioning](#input\_s3\_versioning) | Versioning configuration for the bucket | <pre>object({<br/>    status     = bool<br/>    mfa_delete = bool<br/>  })</pre> | <pre>{<br/>  "mfa_delete": false,<br/>  "status": true<br/>}</pre> | no |
 | <a name="input_tags"></a> [tags](#input\_tags) | Tags added to every resource that supports them | `map(string)` | `{}` | no |
+| <a name="input_upload_credentials"></a> [upload\_credentials](#input\_upload\_credentials) | Map of username => password allowed to upload, stored in its own Secrets Manager secret (separate from `auth_credentials`). Values end up in Terraform state; leave empty to populate the secret out-of-band as a JSON object of username/password pairs | `map(string)` | `{}` | no |
+| <a name="input_upload_enabled"></a> [upload\_enabled](#input\_upload\_enabled) | Whether to accept uploads from twine, uv publish and poetry publish at <index host>/upload/. Uploads need their own credentials (`upload_credentials`), never overwrite an existing file and invalidate the cached index pages. Files are limited to about 4 MB by the Lambda request size | `bool` | `false` | no |
 | <a name="input_upstream_cooldown_days"></a> [upstream\_cooldown\_days](#input\_upstream\_cooldown\_days) | Hide upstream files uploaded less than this many days ago, so a freshly published (possibly malicious) release can't be installed until it has been public for a while. 0 disables the cooldown. Requires an upstream that serves PEP 691 JSON with PEP 700 upload times (pypi.org does) | `number` | `0` | no |
 | <a name="input_upstream_cooldown_exclude"></a> [upstream\_cooldown\_exclude](#input\_upstream\_cooldown\_exclude) | Upstream package names that skip the cooldown, e.g. your own public packages or ones you need to patch quickly. Names are compared after PEP 503 normalization | `list(string)` | `[]` | no |
 | <a name="input_upstream_enabled"></a> [upstream\_enabled](#input\_upstream\_enabled) | Whether to proxy /simple/<package>/ requests to the upstream index when the package is not hosted in the S3 bucket. Locally hosted packages always take precedence | `bool` | `false` | no |
@@ -300,6 +347,9 @@ Contributing, tests and releases: see [CONTRIBUTING.md](CONTRIBUTING.md).
 | <a name="output_s3_bucket_domain_name"></a> [s3\_bucket\_domain\_name](#output\_s3\_bucket\_domain\_name) | The regional domain name of the S3 bucket |
 | <a name="output_s3_bucket_id"></a> [s3\_bucket\_id](#output\_s3\_bucket\_id) | The name of the S3 bucket |
 | <a name="output_s3_bucket_policy"></a> [s3\_bucket\_policy](#output\_s3\_bucket\_policy) | The bucket policy JSON attached by this module (merged with the optional deny policies for a created bucket) |
+| <a name="output_upload_secret_arn"></a> [upload\_secret\_arn](#output\_upload\_secret\_arn) | The ARN of the Secrets Manager secret holding upload credentials (null when uploads are disabled) |
+| <a name="output_upload_secret_name"></a> [upload\_secret\_name](#output\_upload\_secret\_name) | The name of the Secrets Manager secret holding upload credentials (null when uploads are disabled) |
+| <a name="output_upload_url"></a> [upload\_url](#output\_upload\_url) | The upload URL for twine (--repository-url), uv publish (--publish-url) and poetry (repositories.<name>.url); null when uploads are disabled |
 | <a name="output_uploader_policy_json"></a> [uploader\_policy\_json](#output\_uploader\_policy\_json) | IAM policy JSON for a CI identity that uploads packages and invalidates /simple/* (attach it to e.g. a GitHub Actions OIDC role) |
 <!-- END_TF_DOCS -->
 

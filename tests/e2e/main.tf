@@ -36,6 +36,7 @@ module "pypi" {
   upstream_enabled                    = true
   upstream_cooldown_days              = 7
   upstream_cooldown_exclude           = ["six"]
+  upload_enabled                      = true
 
   # Short index TTL so a re-run sees fresh uploads
   cloudfront_ttl_default = 5
@@ -57,4 +58,12 @@ output "cloudfront_distribution_id" {
 
 output "auth_secret_name" {
   value = module.pypi.auth_secret_name
+}
+
+output "upload_url" {
+  value = module.pypi.upload_url
+}
+
+output "upload_secret_name" {
+  value = module.pypi.upload_secret_name
 }

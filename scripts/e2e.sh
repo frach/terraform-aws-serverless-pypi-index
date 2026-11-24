@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end test: deploys the module from this checkout into a real AWS account, publishes a tiny package
-# and checks the index with curl and pip, then tears everything down.
+# with twine, checks uploads, the index with curl and pip, then tears everything down.
 #
 # Usage:  scripts/e2e.sh [run|up|test|down]     (default: run = up + test + down)
 #
@@ -49,6 +49,9 @@ up() {
   log "Setting test credentials in Secrets Manager"
   aws secretsmanager put-secret-value --secret-id "$(out auth_secret_name)" \
     --secret-string "{\"$E2E_USER\": \"$E2E_PASSWORD\"}" >/dev/null
+  # Upload credentials are separate: the same user gets a different password
+  aws secretsmanager put-secret-value --secret-id "$(out upload_secret_name)" \
+    --secret-string "{\"$E2E_USER\": \"upload-$E2E_PASSWORD\"}" >/dev/null
   printf '%s' "$E2E_PASSWORD" >"$E2E_DIR/.e2e-password"
 
   log "Waiting for CloudFront to finish deploying (usually 5-15 minutes)"
@@ -71,15 +74,31 @@ EOF
   printf '__version__ = "%s"\n' "$PKG_VERSION" >"$src/e2e_demo/__init__.py"
 
   python3 -m venv "$WORK/venv"
-  "$WORK/venv/bin/pip" -q install --upgrade pip
+  "$WORK/venv/bin/pip" -q install --upgrade pip twine
   "$WORK/venv/bin/pip" -q wheel --no-deps -w "$WORK/dist" "$src"
 
-  local wheel
+  local wheel upload_url upload_auth
   wheel="$(ls "$WORK/dist"/*.whl)"
-  aws s3 cp "$wheel" "s3://$(out s3_bucket_id)/$PKG_NAME/" >/dev/null
-  aws cloudfront create-invalidation --distribution-id "$(out cloudfront_distribution_id)" --paths '/simple/*' >/dev/null
   WHEEL_FILE="$(basename "$wheel")"
-  pass "uploaded $WHEEL_FILE"
+  upload_url="$(out upload_url)"
+  upload_auth="$E2E_USER:upload-$E2E_PASSWORD"
+
+  # The read password must not be accepted for uploads
+  check_status "upload with the read password is rejected" 401 "$upload_url" -u "$E2E_USER:$E2E_PASSWORD" \
+    -F ":action=file_upload" -F "name=$PKG_NAME" -F "content=@$wheel"
+
+  if "$WORK/venv/bin/twine" upload --non-interactive --repository-url "$upload_url" \
+    -u "$E2E_USER" -p "upload-$E2E_PASSWORD" "$wheel"; then
+    pass "twine upload $WHEEL_FILE"
+  else
+    fail "twine upload $WHEEL_FILE"
+  fi
+
+  check_status "re-uploading the same file succeeds" 200 "$upload_url" -u "$upload_auth" \
+    -F ":action=file_upload" -F "name=$PKG_NAME" -F "content=@$wheel"
+  printf 'different content' >"$WORK/other.whl"
+  check_status "overwriting a file with different content is refused" 409 "$upload_url" -u "$upload_auth" \
+    -F ":action=file_upload" -F "name=$PKG_NAME" -F "content=@$WORK/other.whl;filename=$WHEEL_FILE"
 }
 
 run_tests() {

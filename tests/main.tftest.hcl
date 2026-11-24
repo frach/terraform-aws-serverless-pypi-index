@@ -27,6 +27,12 @@ mock_provider "aws" {
   mock_resource "aws_secretsmanager_secret" {
     defaults = { arn = "arn:aws:secretsmanager:eu-central-1:123456789012:secret:serverless-pypi-index-credentials-abc" }
   }
+  mock_resource "aws_lambda_function_url" {
+    defaults = { function_url = "https://abc123.lambda-url.eu-central-1.on.aws/" }
+  }
+  mock_resource "aws_ssm_parameter" {
+    defaults = { arn = "arn:aws:ssm:eu-central-1:123456789012:parameter/serverless-pypi-index/cloudfront-distribution-id" }
+  }
   mock_data "aws_s3_bucket" {
     defaults = {
       id                          = "existing-bucket"
@@ -50,7 +56,7 @@ run "defaults" {
   }
 
   assert {
-    condition     = length(aws_secretsmanager_secret.auth) == 0 && length(aws_route53_record.alias) == 0 && length(aws_s3_bucket_policy.s3_bucket_policy) == 0
+    condition     = length(aws_secretsmanager_secret.auth) == 0 && length(aws_route53_record.alias) == 0 && length(aws_s3_bucket_policy.s3_bucket_policy) == 0 && length(aws_lambda_function.upload) == 0 && output.upload_url == null
     error_message = "Optional resources must not be created by default."
   }
 
@@ -217,4 +223,48 @@ run "cooldown_must_be_whole_days" {
   }
 
   expect_failures = [var.upstream_cooldown_days]
+}
+
+run "upload_enabled" {
+  command = plan
+
+  variables {
+    upload_enabled                 = true
+    upload_credentials             = { ci = "upload-secret" }
+    cloudfront_aliases             = ["pypi.example.com"]
+    cloudfront_acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/abc"
+  }
+
+  assert {
+    condition     = length(aws_secretsmanager_secret.upload) == 1 && length(aws_secretsmanager_secret_version.upload) == 1 && length(aws_secretsmanager_secret.auth) == 0
+    error_message = "Uploads must get their own credentials secret, independent of read auth."
+  }
+
+  assert {
+    condition     = aws_lambda_function.upload[0].function_name == "serverless-pypi-index-upload" && aws_lambda_function_url.upload[0].authorization_type == "NONE"
+    error_message = "The upload function must be reachable through its function URL."
+  }
+
+  assert {
+    condition     = aws_lambda_function.upload[0].environment[0].variables["DISTRIBUTION_ID_PARAMETER"] == aws_ssm_parameter.upload_distribution_id[0].name
+    error_message = "The upload function must find the distribution ID for invalidations."
+  }
+
+  assert {
+    condition     = output.upload_url == "https://pypi.example.com/upload/"
+    error_message = "upload_url must point at /upload/ on the index host."
+  }
+}
+
+run "upload_without_credentials" {
+  command = plan
+
+  variables {
+    upload_enabled = true
+  }
+
+  assert {
+    condition     = length(aws_secretsmanager_secret.upload) == 1 && length(aws_secretsmanager_secret_version.upload) == 0
+    error_message = "Without credentials the upload secret must be left for out-of-band population."
+  }
 }

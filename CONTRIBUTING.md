@@ -17,7 +17,7 @@ make check       # pre-commit (fmt, docs, tflint, validate, black), terraform te
 | `make test` | Lambda unit tests (pytest) |
 | `make tf-test` | Terraform unit tests with mocked providers, no AWS account needed |
 | `make pre-commit` | Formatting, linting, `terraform validate`, regenerated docs |
-| `make e2e` | Deploys to a real AWS account and tests with curl and pip (see below) |
+| `make e2e` | Deploys to a real AWS account and tests with curl, twine and pip (see below) |
 
 ## Making a change
 
@@ -35,8 +35,8 @@ If you change anything users can see at runtime (CloudFront behaviours, Lambda@E
 
 ## End-to-end test
 
-`make e2e` deploys the module from your checkout to a sandbox AWS account, publishes a small package and checks auth, the
-PEP 503 pages, downloads, the cooldown, security headers, `pip install` and the pypi.org fallback, then tears everything down
+`make e2e` deploys the module from your checkout to a sandbox AWS account, publishes a small package with twine and checks
+uploads (separate password, no overwrite), auth, the PEP 503 pages, downloads, the cooldown, security headers, `pip install` and the pypi.org fallback, then tears everything down
 (a few cents, 15-20 minutes):
 
 ```bash
