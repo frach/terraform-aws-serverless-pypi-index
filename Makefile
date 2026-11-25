@@ -59,8 +59,8 @@ install-devops: $(TFLINT) $(TFDOCS) ## Download tflint and terraform-docs into .
 	@$(TFDOCS) --version
 
 .PHONY: install-hooks
-install-hooks: install-python ## Install git pre-commit hooks
-	@echo "==> Installing pre-commit git hooks..."
+install-hooks: install-python ## Install the git pre-commit and pre-push hooks
+	@echo "==> Installing pre-commit and pre-push git hooks..."
 	@$(VENV)/bin/pre-commit install
 
 $(TFLINT):

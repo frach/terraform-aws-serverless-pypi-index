@@ -1,3 +1,7 @@
+# `pre-commit install` (make install-hooks) sets up both hooks: the checks run on commit and again on push,
+# which also catches commits made without the hook
+default_install_hook_types: [pre-commit, pre-push]
+
 repos:
   - repo: https://github.com/antonbabenko/pre-commit-terraform
     rev: v1.109.2
