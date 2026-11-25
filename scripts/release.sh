@@ -21,7 +21,7 @@ start() {
   current=$(git branch --show-current)
   if [[ $current == main ]]; then
     [[ -z $(git status --porcelain) ]] || fail 'main has uncommitted changes.'
-    git pull --ff-only
+    git pull --ff-only origin main
     git switch -c "$branch"
   elif [[ $current != "$branch" ]]; then
     fail "Run it from main (or from $branch), not from $current."
@@ -53,7 +53,7 @@ start() {
 tag() {
   [[ -z $(git status --porcelain) ]] || fail 'Uncommitted changes; commit or stash them first.'
   git switch main
-  git pull --ff-only
+  git pull --ff-only origin main
   local version
   version=$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' CHANGELOG.md | head -1)
   [[ -n $version ]] || fail 'CHANGELOG.md has no released version yet (is the pull request merged?).'
