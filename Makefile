@@ -151,11 +151,11 @@ pre-commit: install-python ## Run all pre-commit hooks on every file
 .PHONY: test
 test: install-python ## Run pytest
 	@echo "==> Running pytest..."
-	@PYTHONPATH=src $(PYTEST) -v src/
+	@PYTHONPATH=src $(PYTEST) -v src/ tests/e2e/fake_upstream/
 
 .PHONY: format
 format: install-python ## Format Python with Black
-	@$(PYTHON) -m black src/
+	@$(PYTHON) -m black src/ tests/
 
 # ==============================================================================
 # Meta

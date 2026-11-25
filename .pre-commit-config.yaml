@@ -32,4 +32,4 @@ repos:
     rev: 26.10.1
     hooks:
       - id: black
-        files: ^src/
+        files: ^(src|tests)/

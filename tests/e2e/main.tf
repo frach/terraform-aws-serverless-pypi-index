@@ -9,6 +9,10 @@ terraform {
       source  = "hashicorp/aws"
       version = ">= 6.28.0"
     }
+    archive = {
+      source  = "hashicorp/archive"
+      version = ">= 2.4.0"
+    }
   }
 }
 
@@ -26,6 +30,10 @@ variable "name" {
   default     = "pypi-e2e"
 }
 
+locals {
+  cooldown_days = 7
+}
+
 module "pypi" {
   source = "../.."
 
@@ -34,8 +42,9 @@ module "pypi" {
   auth_enabled                        = true
   auth_secret_recovery_window_in_days = 0
   upstream_enabled                    = true
-  upstream_cooldown_days              = 7
-  upstream_cooldown_exclude           = ["six"]
+  upstream_index_url                  = "${trimsuffix(aws_lambda_function_url.fake_upstream.function_url, "/")}/simple"
+  upstream_cooldown_days              = local.cooldown_days
+  upstream_cooldown_exclude           = ["six", "cw-fake-excluded"]
   upload_enabled                      = true
 
   # Short index TTL so a re-run sees fresh uploads
@@ -66,4 +75,86 @@ output "upload_url" {
 
 output "upload_secret_name" {
   value = module.pypi.upload_secret_name
+}
+
+output "fake_upstream_url" {
+  value = aws_lambda_function_url.fake_upstream.function_url
+}
+
+output "cooldown_days" {
+  value = local.cooldown_days
+}
+
+# ------------------------------------------------------------------------------
+# Fake upstream (fake_upstream/fake_upstream.py): pypi.org plus made-up projects
+# with known upload times, so the cooldown is tested deterministically
+# ------------------------------------------------------------------------------
+
+data "archive_file" "fake_upstream" {
+  type        = "zip"
+  source_file = "${path.module}/fake_upstream/fake_upstream.py"
+  output_path = "${path.module}/builds/fake-upstream.zip"
+}
+
+resource "aws_iam_role" "fake_upstream" {
+  name = "${var.name}-fake-upstream"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "fake_upstream" {
+  role       = aws_iam_role.fake_upstream.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_cloudwatch_log_group" "fake_upstream" {
+  name              = "/aws/lambda/${var.name}-fake-upstream"
+  retention_in_days = 1
+}
+
+resource "aws_lambda_function" "fake_upstream" {
+  function_name    = "${var.name}-fake-upstream"
+  role             = aws_iam_role.fake_upstream.arn
+  runtime          = "python3.13"
+  handler          = "fake_upstream.handler"
+  filename         = data.archive_file.fake_upstream.output_path
+  source_code_hash = data.archive_file.fake_upstream.output_base64sha256
+  memory_size      = 512
+  timeout          = 15
+
+  environment {
+    variables = {
+      COOLDOWN_DAYS = tostring(local.cooldown_days)
+    }
+  }
+
+  depends_on = [aws_iam_role_policy_attachment.fake_upstream, aws_cloudwatch_log_group.fake_upstream]
+}
+
+resource "aws_lambda_function_url" "fake_upstream" {
+  function_name      = aws_lambda_function.fake_upstream.function_name
+  authorization_type = "NONE"
+}
+
+# A function URL without IAM auth needs both permissions for anonymous callers (same as the upload function)
+resource "aws_lambda_permission" "fake_upstream_url" {
+  statement_id           = "AllowPublicFunctionUrl"
+  action                 = "lambda:InvokeFunctionUrl"
+  function_name          = aws_lambda_function.fake_upstream.function_name
+  principal              = "*"
+  function_url_auth_type = "NONE"
+}
+
+resource "aws_lambda_permission" "fake_upstream_invoke" {
+  statement_id             = "AllowInvokeViaFunctionUrl"
+  action                   = "lambda:InvokeFunction"
+  function_name            = aws_lambda_function.fake_upstream.function_name
+  principal                = "*"
+  invoked_via_function_url = true
 }

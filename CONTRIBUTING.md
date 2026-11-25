@@ -17,7 +17,7 @@ make check       # pre-commit (fmt, docs, tflint, validate, black), terraform te
 | `make test` | Lambda unit tests (pytest) |
 | `make tf-test` | Terraform unit tests with mocked providers, no AWS account needed |
 | `make pre-commit` | Formatting, linting, `terraform validate`, regenerated docs |
-| `make e2e` | Deploys to a real AWS account and tests with curl, twine and pip (see below) |
+| `make e2e` | Deploys to a real AWS account and runs the end-to-end suite (see below) |
 
 ## Making a change
 
@@ -35,9 +35,12 @@ If you change anything users can see at runtime (CloudFront behaviours, Lambda@E
 
 ## End-to-end test
 
-`make e2e` deploys the module from your checkout to a sandbox AWS account, publishes a small package with twine and checks
-uploads (separate password, no overwrite), auth, the PEP 503 pages, downloads, the cooldown, security headers, `pip install` and the pypi.org fallback, then tears everything down
-(a few cents, 15-20 minutes):
+`make e2e` deploys the module from your checkout to a sandbox AWS account and runs the pytest suite in `tests/e2e/suite`:
+read auth and security headers, uploads (separate password, no overwrite, twine, `uv publish`, `poetry publish`), the PEP 503
+pages and downloads, the cooldown, and installs with pip, uv and Poetry. The upstream is a fake index
+(`tests/e2e/fake_upstream`, a Lambda behind a function URL) that serves made-up `cw-fake-*` projects with known upload times,
+so every cooldown rule is checked exactly; other names are passed through to pypi.org as a smoke test. Then everything is torn
+down (a few cents, 15-20 minutes):
 
 ```bash
 AWS_PROFILE=sandbox AWS_REGION=eu-central-1 make e2e
@@ -45,6 +48,10 @@ AWS_PROFILE=sandbox AWS_REGION=eu-central-1 make e2e
 
 Lambda@Edge functions can only be deleted a few hours after their CloudFront distribution, so the teardown may stop at the
 function. Finish it later with `make e2e-destroy`.
+
+`KEEP=1 make e2e` leaves the deployment up; `PYTEST_ARGS="-k cooldown" scripts/e2e.sh test` then re-runs part of the suite in
+a minute. The suite is configured only through `E2E_*` environment variables (see `tests/e2e/suite/conftest.py`), so it can also
+run against a deployment made another way, such as a wrapper module.
 
 ## Style
 
