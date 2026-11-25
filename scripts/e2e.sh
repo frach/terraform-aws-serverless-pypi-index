@@ -4,7 +4,7 @@
 # known upload times, pip/uv/poetry/twine), then tears everything down.
 #
 # Usage:  scripts/e2e.sh [run|up|test|down]     (default: run = up + test + down)
-#         PYTEST_ARGS="-k cooldown" scripts/e2e.sh test   re-runs part of the suite against a deployment kept with KEEP=1
+#         Usually through make (make e2e, make e2e-test, make e2e-destroy), which sets AWS_PROFILE and AWS_REGION.
 #
 # Needs: terraform (or TF=tofu), aws CLI v2, python3 >= 3.9, and AWS credentials for a test account,
 # e.g. AWS_PROFILE=my-sandbox AWS_REGION=eu-central-1 scripts/e2e.sh
@@ -77,7 +77,7 @@ Destroy didn't finish. This is expected for Lambda@Edge: AWS deletes the functio
 a few hours after the CloudFront distribution is gone, and only then can the function be deleted.
 Everything else is already removed. Finish the cleanup later with:
 
-  AWS_PROFILE=${AWS_PROFILE:-<profile>} AWS_REGION=$AWS_REGION $0 down
+  make e2e-destroy   (or: AWS_PROFILE=${AWS_PROFILE:-<profile>} AWS_REGION=$AWS_REGION $0 down)
 EOF
   return 1
 }

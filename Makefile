@@ -33,6 +33,11 @@ TFDOCS          := $(BIN)/terraform-docs
 
 .DEFAULT_GOAL   := help
 
+# End-to-end test account: the maintainers' sandbox. Override for your own, e.g. make e2e E2E_PROFILE=my-sandbox
+E2E_PROFILE     ?= coldwheel-nonprod
+E2E_REGION      ?= eu-central-1
+E2E_ENV         := AWS_PROFILE=$(E2E_PROFILE) AWS_REGION=$(E2E_REGION)
+
 # ==============================================================================
 # Setup
 # ==============================================================================
@@ -111,12 +116,16 @@ tf-test: ## Run Terraform unit tests with mocked providers (Terraform >= 1.7)
 	@terraform test
 
 .PHONY: e2e
-e2e: ## Deploy to a real AWS account, test with curl + pip, destroy (needs AWS credentials; KEEP=1 keeps it up)
-	@scripts/e2e.sh run
+e2e: ## Deploy to the E2E_PROFILE account, run tests/e2e/suite, destroy (KEEP=1 keeps it up)
+	@$(E2E_ENV) scripts/e2e.sh run
+
+.PHONY: e2e-test
+e2e-test: ## Re-run the suite against a deployment kept with KEEP=1 (PYTEST_ARGS="-k cooldown" for a part)
+	@$(E2E_ENV) scripts/e2e.sh test
 
 .PHONY: e2e-destroy
 e2e-destroy: ## Remove the e2e deployment (re-run hours later if Lambda@Edge replicas block it)
-	@scripts/e2e.sh down
+	@$(E2E_ENV) scripts/e2e.sh down
 
 .PHONY: release
 release: ## Start a release VERSION=x.y.z: branch, CHANGELOG, README pin, commit, push (CONTRIBUTING.md)

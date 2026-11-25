@@ -43,13 +43,14 @@ so every cooldown rule is checked exactly; other names are passed through to pyp
 down (a few cents, 15-20 minutes):
 
 ```bash
-AWS_PROFILE=sandbox AWS_REGION=eu-central-1 make e2e
+make e2e                                              # maintainers' sandbox (coldwheel-nonprod, eu-central-1)
+make e2e E2E_PROFILE=my-sandbox E2E_REGION=eu-west-1   # your own account
 ```
 
 Lambda@Edge functions can only be deleted a few hours after their CloudFront distribution, so the teardown may stop at the
 function. Finish it later with `make e2e-destroy`.
 
-`KEEP=1 make e2e` leaves the deployment up; `PYTEST_ARGS="-k cooldown" scripts/e2e.sh test` then re-runs part of the suite in
+`make e2e KEEP=1` leaves the deployment up; `make e2e-test PYTEST_ARGS="-k cooldown"` then re-runs part of the suite in
 a minute. The suite is configured only through `E2E_*` environment variables (see `tests/e2e/suite/conftest.py`), so it can also
 run against a deployment made another way, such as a wrapper module.
 
