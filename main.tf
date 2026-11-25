@@ -71,7 +71,6 @@ locals {
   }
 }
 
-
 #-----------------------------#
 #             S 3             #
 #-----------------------------#
@@ -113,7 +112,6 @@ module "s3_bucket" {
 
   tags = var.tags
 }
-
 
 #---------------------------#
 #       BUCKET POLICY       #
@@ -193,7 +191,6 @@ resource "aws_s3_bucket_policy" "s3_bucket_policy" {
   bucket = local.s3_bucket_id
   policy = data.aws_iam_policy_document.s3_bucket.json
 }
-
 
 #--------------------------#
 #        CLOUDFRONT        #
@@ -367,7 +364,6 @@ resource "aws_route53_record" "alias" {
   }
 }
 
-
 #---------------------------#
 #      AUTHENTICATION       #
 #---------------------------#
@@ -389,7 +385,6 @@ resource "aws_secretsmanager_secret_version" "auth" {
   secret_id     = aws_secretsmanager_secret.auth[0].id
   secret_string = jsonencode(var.auth_credentials)
 }
-
 
 #--------------------------#
 #          LAMBDA          #
@@ -524,7 +519,6 @@ resource "aws_lambda_function" "edge" {
 
   depends_on = [aws_iam_role_policy.lambda_edge_logs, aws_cloudwatch_log_group.lambda_edge]
 }
-
 
 #--------------------------#
 #          UPLOAD          #
@@ -675,31 +669,12 @@ resource "aws_lambda_function" "upload" {
   depends_on = [aws_cloudwatch_log_group.upload]
 }
 
-# Public URL; every request is checked against the upload credentials by the function itself
+# Public URL; every request is checked against the upload credentials by the function itself. With NONE the AWS provider
+# (>= 6.28) adds the lambda:InvokeFunctionUrl and lambda:InvokeFunction permissions itself; separate aws_lambda_permission
+# resources race with it (ResourceConflictException)
 resource "aws_lambda_function_url" "upload" {
   count = var.upload_enabled ? 1 : 0
 
   function_name      = aws_lambda_function.upload[0].function_name
   authorization_type = "NONE"
-}
-
-# A function URL without IAM auth needs both permissions for anonymous callers
-resource "aws_lambda_permission" "upload_url" {
-  count = var.upload_enabled ? 1 : 0
-
-  statement_id           = "AllowPublicFunctionUrl"
-  action                 = "lambda:InvokeFunctionUrl"
-  function_name          = aws_lambda_function.upload[0].function_name
-  principal              = "*"
-  function_url_auth_type = "NONE"
-}
-
-resource "aws_lambda_permission" "upload_invoke" {
-  count = var.upload_enabled ? 1 : 0
-
-  statement_id             = "AllowInvokeViaFunctionUrl"
-  action                   = "lambda:InvokeFunction"
-  function_name            = aws_lambda_function.upload[0].function_name
-  principal                = "*"
-  invoked_via_function_url = true
 }

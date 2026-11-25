@@ -141,20 +141,3 @@ resource "aws_lambda_function_url" "fake_upstream" {
   function_name      = aws_lambda_function.fake_upstream.function_name
   authorization_type = "NONE"
 }
-
-# A function URL without IAM auth needs both permissions for anonymous callers (same as the upload function)
-resource "aws_lambda_permission" "fake_upstream_url" {
-  statement_id           = "AllowPublicFunctionUrl"
-  action                 = "lambda:InvokeFunctionUrl"
-  function_name          = aws_lambda_function.fake_upstream.function_name
-  principal              = "*"
-  function_url_auth_type = "NONE"
-}
-
-resource "aws_lambda_permission" "fake_upstream_invoke" {
-  statement_id             = "AllowInvokeViaFunctionUrl"
-  action                   = "lambda:InvokeFunction"
-  function_name            = aws_lambda_function.fake_upstream.function_name
-  principal                = "*"
-  invoked_via_function_url = true
-}
