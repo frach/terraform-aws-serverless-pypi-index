@@ -68,3 +68,18 @@ output "auth_secret_name" {
   value       = try(aws_secretsmanager_secret.auth[0].name, null)
   description = "The name of the Secrets Manager secret holding Basic Auth credentials (null when auth is disabled)"
 }
+
+output "upload_url" {
+  value       = var.upload_enabled ? "https://${length(var.cloudfront_aliases) > 0 ? var.cloudfront_aliases[0] : module.cloudfront.cloudfront_distribution_domain_name}/upload/" : null
+  description = "The upload URL for twine (--repository-url), uv publish (--publish-url) and poetry (repositories.<name>.url); null when uploads are disabled"
+}
+
+output "upload_secret_arn" {
+  value       = try(aws_secretsmanager_secret.upload[0].arn, null)
+  description = "The ARN of the Secrets Manager secret holding upload credentials (null when uploads are disabled)"
+}
+
+output "upload_secret_name" {
+  value       = try(aws_secretsmanager_secret.upload[0].name, null)
+  description = "The name of the Secrets Manager secret holding upload credentials (null when uploads are disabled)"
+}

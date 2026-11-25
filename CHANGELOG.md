@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+
+* Uploads with `twine upload`, `uv publish` and `poetry publish`: `upload_enabled = true` adds `<index host>/upload/` (the `upload_url` output), served by a regional Lambda behind CloudFront. Upload credentials (`upload_credentials`, or the `upload_secret_name` secret) are separate from the read credentials. An existing file is never overwritten (`409 File already exists`); uploading the identical file again succeeds, so re-run publish jobs don't fail. File names must belong to the project and client digests must match. Each upload invalidates `/simple/` and the project's page. Files are limited to about 4 MB by the Lambda request size; bigger files still go through `aws s3 cp`.
+
 ### Changes
 
 * Releases are `make release VERSION=x.y.z` and, after the merge, `make release-tag` (`scripts/release.sh`, CONTRIBUTING.md).

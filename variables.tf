@@ -141,15 +141,30 @@ variable "auth_realm" {
 }
 
 variable "auth_cache_ttl" {
-  description = "Number of seconds the Lambda@Edge function caches credentials in memory before re-reading the secret. Credential changes take up to this long to propagate"
+  description = "Number of seconds the Lambda functions cache credentials (read and upload) in memory before re-reading the secret. Credential changes take up to this long to propagate"
   type        = number
   default     = 300
 }
 
 variable "auth_secret_recovery_window_in_days" {
-  description = "Number of days Secrets Manager waits before deleting the credentials secret. 0 forces immediate deletion"
+  description = "Number of days Secrets Manager waits before deleting a credentials secret (read or upload). 0 forces immediate deletion"
   type        = number
   default     = 7
+}
+
+
+# Upload variables
+variable "upload_enabled" {
+  description = "Whether to accept uploads from twine, uv publish and poetry publish at <index host>/upload/. Uploads need their own credentials (`upload_credentials`), never overwrite an existing file and invalidate the cached index pages. Files are limited to about 4 MB by the Lambda request size"
+  type        = bool
+  default     = false
+}
+
+variable "upload_credentials" {
+  description = "Map of username => password allowed to upload, stored in its own Secrets Manager secret (separate from `auth_credentials`). Values end up in Terraform state; leave empty to populate the secret out-of-band as a JSON object of username/password pairs"
+  type        = map(string)
+  default     = {}
+  sensitive   = true
 }
 
 
