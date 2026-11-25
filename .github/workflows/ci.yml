@@ -54,6 +54,10 @@ jobs:
         run: make install-python
 
       - name: Run pre-commit
+        # The hooks download tflint and terraform-docs by looking them up in the GitHub API; unauthenticated
+        # calls share a small per-IP rate limit on hosted runners and fail now and then
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: .venv/bin/pre-commit run --all-files --show-diff-on-failure
 
   test:
