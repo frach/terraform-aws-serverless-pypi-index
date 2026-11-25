@@ -29,7 +29,7 @@ provider "aws" {
 
 module "pypi" {
   source  = "frach/serverless-pypi-index/aws"
-  version = "~> 0.3"
+  version = "~> 0.4"
 
   auth_enabled     = true
   upstream_enabled = true
@@ -78,7 +78,7 @@ auth, Lambda@Edge only runs on index cache misses and no secret is created.
 ```hcl
 module "pypi" {
   source  = "frach/serverless-pypi-index/aws"
-  version = "~> 0.3"
+  version = "~> 0.4"
 
   cloudfront_aliases             = ["pypi.example.com"]
   cloudfront_acm_certificate_arn = aws_acm_certificate.pypi.arn # must be in us-east-1
@@ -96,7 +96,7 @@ module "pypi" {
 ```hcl
 module "pypi" {
   source  = "frach/serverless-pypi-index/aws"
-  version = "~> 0.3"
+  version = "~> 0.4"
 
   auth_enabled = true
   auth_credentials = {
@@ -117,7 +117,7 @@ module "pypi" {
 ```hcl
 module "pypi" {
   source  = "frach/serverless-pypi-index/aws"
-  version = "~> 0.3"
+  version = "~> 0.4"
 
   upstream_enabled          = true
   upstream_index_url        = "https://pypi.org/simple" # default
