@@ -1,0 +1,6 @@
+# Python packages for the end-to-end suite (tests/e2e/suite), installed by scripts/e2e.sh into its own venv
+pytest>=8.0
+requests>=2.31
+twine>=6.0
+uv>=0.5
+poetry>=2.0
