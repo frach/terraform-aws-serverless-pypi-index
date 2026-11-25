@@ -30,6 +30,8 @@ variable "name" {
   default     = "pypi-e2e"
 }
 
+data "aws_caller_identity" "current" {}
+
 locals {
   cooldown_days = 7
 }
@@ -50,6 +52,8 @@ module "pypi" {
   # Short index TTL so a re-run sees fresh uploads
   cloudfront_ttl_default = 5
 
+  # Fixed name, so the CI role (aws-foundations, github-e2e) can be limited to the e2e buckets
+  s3_bucket_name   = "${var.name}-${data.aws_caller_identity.current.account_id}"
   s3_force_destroy = true
 }
 
