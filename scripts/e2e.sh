@@ -26,6 +26,15 @@ log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 tf() { "$TF" -chdir="$E2E_DIR" "$@"; }
 out() { tf output -raw "$1"; }
 
+# Stop before anything else (including the teardown) when there are no usable AWS credentials, e.g. an expired SSO login
+need_aws() {
+  if ! aws sts get-caller-identity >/dev/null 2>&1; then
+    printf '\033[31mNo valid AWS credentials for profile %s.\033[0m Log in first, e.g.:\n  aws sso login --profile %s\n' \
+      "${AWS_PROFILE:-default}" "${AWS_PROFILE:-<profile>}" >&2
+    exit 1
+  fi
+}
+
 up() {
   log "Checking AWS credentials"
   aws sts get-caller-identity --query '[Account, Arn]' --output text
@@ -81,6 +90,8 @@ Everything else is already removed. Finish the cleanup later with:
 EOF
   return 1
 }
+
+[[ "${1:-run}" =~ ^(run|up|down)$ ]] && need_aws
 
 case "${1:-run}" in
   up) up ;;
